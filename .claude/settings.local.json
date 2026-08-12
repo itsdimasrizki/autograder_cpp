@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(timeout 60 npm ping)",
+      "Bash(npm install *)",
+      "Bash(npx vitest *)",
+      "Bash(npx tsc *)",
+      "Bash(node -p \"require\\('./node_modules/@supabase/supabase-js/package.json'\\).version + ' postgrest:' + require\\('./node_modules/@supabase/postgrest-js/package.json'\\).version\")",
+      "Bash(npx next *)",
+      "Bash(pkill -f \"next start -p 3111\")",
+      "Bash(rm -f /tmp/smoke.env /tmp/smoke.log /tmp/login.html)",
+      "Bash(git init *)",
+      "Bash(git add *)",
+      "Bash(curl -s -o /dev/null -w \"server masih hidup? HTTP %{http_code}\\\\n\" --max-time 3 http://localhost:3111/login)",
+      "Bash(pkill -f \"next-server\")",
+      "Bash(pkill -f \"3111\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" --max-time 3 http://localhost:3111/login)"
+    ]
+  }
+}

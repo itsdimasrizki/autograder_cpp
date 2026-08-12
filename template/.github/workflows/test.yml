@@ -1,0 +1,109 @@
+name: "Praktikum C++ — Auto Grade"
+
+# Setiap push ke repository mahasiswa dihitung sebagai satu percobaan
+# pengumpulan. Tidak ada tombol "submit" terpisah.
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+  workflow_dispatch:
+
+# Workflow ini tidak memerlukan hak tulis apa pun dan TIDAK memakai secret.
+# Hasil penilaian diambil oleh aplikasi web lewat GitHub App, bukan dikirim
+# dari sini, sehingga tidak ada kredensial yang tersimpan di repo mahasiswa.
+permissions:
+  contents: read
+
+jobs:
+  grade:
+    name: "Compile & Grade"
+    runs-on: ubuntu-latest
+
+    steps:
+      # -----------------------------------------------------------------------
+      # 1. Checkout kode mahasiswa
+      # -----------------------------------------------------------------------
+      - name: "Checkout repository"
+        uses: actions/checkout@v4
+
+      - name: "Verifikasi compiler"
+        run: |
+          g++ --version
+          echo "Compiler siap."
+
+      # -----------------------------------------------------------------------
+      # 2. Compile student.cpp
+      #    Gagal compile => tulis result.json (score 0, status ERROR) lalu
+      #    hentikan job. Artifact tetap diunggah oleh step berikutnya.
+      # -----------------------------------------------------------------------
+      - name: "Compile student.cpp"
+        run: |
+          echo "=== Mengompilasi kode mahasiswa ==="
+          if ! g++ -std=c++17 -Wall -Wextra -c src/student.cpp -o student.o 2>&1 | tee compile_student.log; then
+            ./scripts/write_error_result.sh "COMPILE_ERROR" "Kode mahasiswa gagal dikompilasi." compile_student.log
+            exit 1
+          fi
+          # tee menyembunyikan exit code g++, jadi periksa keberadaan object file.
+          if [ ! -f student.o ]; then
+            ./scripts/write_error_result.sh "COMPILE_ERROR" "Kode mahasiswa gagal dikompilasi." compile_student.log
+            exit 1
+          fi
+          echo "=== Compile sukses ==="
+
+      # -----------------------------------------------------------------------
+      # 3. Compile checker (milik instruktur) dan link dengan student.o
+      # -----------------------------------------------------------------------
+      - name: "Compile checker"
+        run: |
+          echo "=== Mengompilasi checker ==="
+          if ! g++ -std=c++17 -Wall -Wextra tests/checker.cpp student.o -o checker_bin 2>&1 | tee compile_checker.log; then
+            ./scripts/write_error_result.sh "CHECKER_ERROR" "Checker gagal dikompilasi terhadap kode mahasiswa." compile_checker.log
+            exit 1
+          fi
+          if [ ! -f checker_bin ]; then
+            ./scripts/write_error_result.sh "CHECKER_ERROR" "Checker gagal dikompilasi terhadap kode mahasiswa." compile_checker.log
+            exit 1
+          fi
+          echo "=== Checker siap ==="
+
+      # -----------------------------------------------------------------------
+      # 4. Jalankan test.
+      #    Checker sendiri yang menulis result.json (lihat tests/report.h).
+      # -----------------------------------------------------------------------
+      - name: "Jalankan test & hitung score"
+        id: run_tests
+        run: |
+          echo "=== Menjalankan automated test ==="
+          set +e
+          ./checker_bin
+          CHECKER_EXIT=$?
+          set -e
+
+          # Checker crash sebelum sempat menulis result.json (mis. segfault).
+          if [ ! -f result.json ]; then
+            ./scripts/write_error_result.sh "RUNTIME_ERROR" "Checker berhenti tidak wajar (exit ${CHECKER_EXIT})." ""
+          fi
+
+          exit "$CHECKER_EXIT"
+
+      # -----------------------------------------------------------------------
+      # 5. Job Summary yang mudah dibaca — dibuat DARI result.json,
+      #    bukan dari hasil parsing teks terminal.
+      # -----------------------------------------------------------------------
+      - name: "Tulis Job Summary"
+        if: always()
+        run: python3 scripts/job_summary.py result.json >> "$GITHUB_STEP_SUMMARY"
+
+      # -----------------------------------------------------------------------
+      # 6. Unggah hasil yang dapat dibaca mesin.
+      #    Aplikasi web mengunduh artifact bernama "grading-result".
+      # -----------------------------------------------------------------------
+      - name: "Unggah hasil penilaian"
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: grading-result
+          path: result.json
+          if-no-files-found: warn
+          retention-days: 90
