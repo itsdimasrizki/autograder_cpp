@@ -1,8 +1,12 @@
 import Link from "next/link";
 import { requireRole } from "@/lib/auth/current-user";
-import { countUsersByRole, listUsers } from "@/lib/db/users";
+import {
+  countSubmissionsByUser,
+  countUsersByRole,
+  listUsers,
+} from "@/lib/db/users";
 import { listClassesForUsers } from "@/lib/db/courses";
-import { setRoleAction } from "@/lib/actions/admin";
+import { deleteUserAction, setRoleAction } from "@/lib/actions/admin";
 import type { UserRole } from "@/lib/db/types";
 import {
   USER_TABS,
@@ -38,12 +42,15 @@ export default async function UsersPage({
 
   // Penyaringan dilakukan di database, bukan dengan mengirim semua baris lalu
   // menyembunyikannya di browser.
-  const [users, counts] = await Promise.all([
+  const [users, counts, submissionsByUser] = await Promise.all([
     listUsers({ role: tabToRoleFilter(tab) }),
     countUsersByRole(),
+    countSubmissionsByUser(),
   ]);
 
   const classesByUser = await listClassesForUsers(users.map((u) => u.id));
+
+  const backTo = tab === "ALL" ? "/users" : `/users?role=${tab}`;
 
   const tabCount: Record<UserTab, number> = {
     ALL: counts.STUDENT + counts.ASSISTANT + counts.SUPER_ADMIN,
@@ -141,13 +148,23 @@ export default async function UsersPage({
                     {formatDate(row.created_at)}
                   </Td>
                   <Td>
-                    <RoleAction
-                      userId={row.id}
-                      login={row.github_login}
-                      role={row.role}
-                      isSelf={row.id === admin.id}
-                      backTo={tab === "ALL" ? "/users" : `/users?role=${tab}`}
-                    />
+                    <div className="flex items-center gap-2">
+                      <RoleAction
+                        userId={row.id}
+                        login={row.github_login}
+                        role={row.role}
+                        isSelf={row.id === admin.id}
+                        backTo={backTo}
+                      />
+                      <DeleteAction
+                        userId={row.id}
+                        login={row.github_login}
+                        role={row.role}
+                        isSelf={row.id === admin.id}
+                        submissions={submissionsByUser[row.id] ?? 0}
+                        backTo={backTo}
+                      />
+                    </div>
                   </Td>
                 </tr>
               );
@@ -200,6 +217,49 @@ function RoleAction({
         message={`Ubah role @${login} dari ${role} menjadi ${nextRole}?`}
       >
         {label}
+      </ConfirmButton>
+    </form>
+  );
+}
+
+/**
+ * Tombol hapus permanen.
+ *
+ * Penghapusan merambat ke seluruh submission dan repository pengguna, jadi
+ * dialog konfirmasinya menyebut angka persis yang akan hilang — bukan sekadar
+ * "yakin?". Aturan yang sama diuji ulang di server oleh `canDeleteUser`.
+ */
+function DeleteAction({
+  userId,
+  login,
+  role,
+  isSelf,
+  submissions,
+  backTo,
+}: {
+  userId: string;
+  login: string;
+  role: UserRole;
+  isSelf: boolean;
+  submissions: number;
+  backTo: string;
+}) {
+  // SUPER_ADMIN dan akun sendiri tidak pernah bisa dihapus dari sini.
+  if (role === "SUPER_ADMIN" || isSelf) return null;
+
+  const dampak =
+    submissions > 0
+      ? `\n\nAkun ini punya ${submissions} submission. Seluruh nilai dan riwayat pengumpulannya akan IKUT TERHAPUS PERMANEN dan tidak dapat dikembalikan.`
+      : "\n\nAkun ini belum punya submission apa pun.";
+
+  return (
+    <form action={deleteUserAction}>
+      <input type="hidden" name="userId" value={userId} />
+      <input type="hidden" name="backTo" value={backTo} />
+      <ConfirmButton
+        message={`Hapus permanen akun @${login}?${dampak}\n\nRepository di GitHub tidak ikut terhapus.`}
+      >
+        Hapus
       </ConfirmButton>
     </form>
   );

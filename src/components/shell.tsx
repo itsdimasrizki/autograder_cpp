@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import type { User } from "@/lib/db/types";
 import { Badge } from "@/components/ui";
+import { Logo } from "@/components/logo";
 
 /**
  * Kerangka halaman: navigasi atas + konten.
@@ -33,7 +34,11 @@ export function Shell({
     <div className="min-h-screen">
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3">
-          <Link href="/dashboard" className="text-sm font-semibold text-slate-900">
+          <Link
+            href="/dashboard"
+            className="flex items-center gap-2 text-sm font-semibold text-slate-900"
+          >
+            <Logo className="h-6 w-6 shrink-0 text-slate-900" />
             Praktikum Struktur Data
           </Link>
 

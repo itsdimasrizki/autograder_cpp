@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { ErrorNote } from "@/components/ui";
+import { Logo } from "@/components/logo";
 
 export const dynamic = "force-dynamic";
 
@@ -31,9 +32,12 @@ export default async function LoginPage({
   return (
     <div className="flex min-h-screen items-center justify-center px-4">
       <div className="w-full max-w-sm rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-        <h1 className="text-lg font-semibold text-slate-900">
-          Praktikum Struktur Data
-        </h1>
+        <div className="flex items-center gap-2.5">
+          <Logo className="h-8 w-8 shrink-0 text-slate-900" />
+          <h1 className="text-lg font-semibold text-slate-900">
+            Praktikum Struktur Data
+          </h1>
+        </div>
         <p className="mt-1 text-sm text-slate-600">
           Masuk memakai akun GitHub yang Anda gunakan untuk mengerjakan
           praktikum.

@@ -11,6 +11,7 @@ import { getClass, getCourse } from "@/lib/db/courses";
 import { joinClassAction } from "@/lib/actions/join";
 import { Shell } from "@/components/shell";
 import { Button, Card, ErrorNote } from "@/components/ui";
+import { Logo } from "@/components/logo";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +20,10 @@ function Panel({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-screen items-center justify-center px-4">
       <div className="w-full max-w-sm rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="mb-4 flex items-center gap-2 text-sm font-semibold text-slate-900">
+          <Logo className="h-6 w-6 shrink-0 text-slate-900" />
+          Praktikum Struktur Data
+        </div>
         {children}
       </div>
     </div>

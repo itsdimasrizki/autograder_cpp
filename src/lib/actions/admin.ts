@@ -5,8 +5,14 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 
 import { requireAccessContext } from "@/lib/auth/authorize";
-import { assert, canChangeRole } from "@/lib/auth/policy";
-import { findUserById, logRoleChange, setUserRole } from "@/lib/db/users";
+import { assert, canChangeRole, canDeleteUser } from "@/lib/auth/policy";
+import {
+  countUserFootprint,
+  deleteUser,
+  findUserById,
+  logRoleChange,
+  setUserRole,
+} from "@/lib/db/users";
 import { runAction, safePath, withResult } from "@/lib/actions/result";
 
 /**
@@ -53,6 +59,54 @@ export async function setRoleAction(formData: FormData) {
       fromRole: target.role,
       toRole: input.role,
     });
+  });
+
+  revalidatePath("/users");
+  revalidatePath("/admin");
+  redirect(withResult(backTo, message));
+}
+
+/**
+ * Menghapus permanen sebuah akun pengguna.
+ *
+ * Ini operasi yang tidak dapat dibatalkan: karena ON DELETE CASCADE, seluruh
+ * keanggotaan kelas, catatan repository, dan submission (termasuk nilainya)
+ * milik pengguna tersebut ikut terhapus. Repository di GitHub tidak disentuh.
+ *
+ * Jumlah yang terhapus dicatat ke log server supaya kejadiannya tetap dapat
+ * ditelusuri walau barisnya sudah hilang.
+ */
+export async function deleteUserAction(formData: FormData) {
+  const backTo = safePath(String(formData.get("backTo") ?? ""), "/users");
+
+  const message = await runAction(async () => {
+    const ctx = await requireAccessContext();
+
+    const userId = z
+      .string()
+      .uuid("ID pengguna tidak valid.")
+      .parse(formData.get("userId"));
+
+    const target = await findUserById(userId);
+    if (!target) throw new Error("Pengguna tidak ditemukan.");
+
+    assert(
+      canDeleteUser(ctx, target),
+      target.role === "SUPER_ADMIN"
+        ? "Akun SUPER_ADMIN tidak dapat dihapus lewat halaman ini."
+        : ctx.user.id === target.id
+          ? "Anda tidak dapat menghapus akun Anda sendiri."
+          : "Anda tidak berhak menghapus pengguna.",
+    );
+
+    const footprint = await countUserFootprint(target.id);
+    console.warn(
+      `[admin] @${ctx.user.id} menghapus permanen @${target.github_login} ` +
+        `(github_user_id ${target.github_user_id}) beserta ` +
+        `${footprint.submissions} submission dan ${footprint.repositories} repository.`,
+    );
+
+    await deleteUser(target.id);
   });
 
   revalidatePath("/users");

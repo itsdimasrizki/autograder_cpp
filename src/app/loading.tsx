@@ -1,3 +1,5 @@
+import { Logo } from "@/components/logo";
+
 /**
  * Kerangka halaman yang langsung tampil saat berpindah halaman.
  *
@@ -13,7 +15,8 @@ export default function Loading() {
     <div className="min-h-screen">
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto flex max-w-6xl items-center gap-x-6 px-4 py-3">
-          <span className="text-sm font-semibold text-slate-900">
+          <span className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+            <Logo className="h-6 w-6 shrink-0 text-slate-900" />
             Praktikum Struktur Data
           </span>
           <span className="text-sm text-slate-400">Memuat…</span>

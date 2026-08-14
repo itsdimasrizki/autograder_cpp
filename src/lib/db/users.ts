@@ -224,6 +224,63 @@ export async function listUsers(
   return data ?? [];
 }
 
+/**
+ * Menghapus permanen sebuah akun.
+ *
+ * PERINGATAN: foreign key pada skema memakai ON DELETE CASCADE, sehingga
+ * keanggotaan kelas, student_repositories, dan submissions milik pengguna ini
+ * ikut terhapus. Repository di GitHub sendiri tidak disentuh.
+ *
+ * Pemanggil WAJIB memeriksa `canDeleteUser` lebih dulu.
+ */
+export async function deleteUser(userId: string): Promise<void> {
+  const { error } = await db().from("users").delete().eq("id", userId);
+  if (error) throw new Error(`Supabase: ${error.message}`);
+}
+
+/** Apa saja yang akan ikut hilang bila akun ini dihapus. */
+export async function countUserFootprint(
+  userId: string,
+): Promise<{ submissions: number; repositories: number }> {
+  const client = db();
+
+  const [submissions, repositories] = await Promise.all([
+    client
+      .from("submissions")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId),
+    client
+      .from("student_repositories")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId),
+  ]);
+
+  if (submissions.error) throw new Error(`Supabase: ${submissions.error.message}`);
+  if (repositories.error) {
+    throw new Error(`Supabase: ${repositories.error.message}`);
+  }
+
+  return {
+    submissions: submissions.count ?? 0,
+    repositories: repositories.count ?? 0,
+  };
+}
+
+/**
+ * Jumlah submission per pengguna dalam satu query, untuk menampilkan angka
+ * pada dialog konfirmasi tanpa menembak query per baris tabel.
+ */
+export async function countSubmissionsByUser(): Promise<Record<string, number>> {
+  const { data, error } = await db().from("submissions").select("user_id");
+  if (error) throw new Error(`Supabase: ${error.message}`);
+
+  const counts: Record<string, number> = {};
+  for (const row of data ?? []) {
+    counts[row.user_id] = (counts[row.user_id] ?? 0) + 1;
+  }
+  return counts;
+}
+
 /** Jumlah pengguna per role, untuk angka pada tab filter. */
 export async function countUsersByRole(): Promise<Record<UserRole, number>> {
   const { data, error } = await db().from("users").select("role");

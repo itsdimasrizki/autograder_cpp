@@ -23,7 +23,9 @@
       "Bash(curl -s -o /dev/null --max-time 2 http://localhost:3099/login)",
       "Bash(pkill -9 -f \"3098\")",
       "Bash(curl -s -o /dev/null --max-time 2 http://localhost:3098/login)",
-      "Bash(rm -f /tmp/claude-1000/-home-lazy4u-Projects-web-strukdat/74cde00b-6158-4163-818f-a050172f9e53/scratchpad/*.mjs)"
+      "Bash(rm -f /tmp/claude-1000/-home-lazy4u-Projects-web-strukdat/74cde00b-6158-4163-818f-a050172f9e53/scratchpad/*.mjs)",
+      "Bash(curl -s \"https://api.github.com/repos/itsdimasrizki/autograder_cpp\")",
+      "Bash(grep -iE \"\\\\.pem$|\\\\.env\\\\.local|private-key\")"
     ]
   }
 }

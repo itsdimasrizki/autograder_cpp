@@ -4,6 +4,7 @@ import {
   assert,
   canAssignAssistants,
   canChangeRole,
+  canDeleteUser,
   canListAllUsers,
   canManageAssignment,
   canManageClassRoster,
@@ -281,6 +282,38 @@ describe("perubahan role", () => {
   it("mengubah role menjadi role yang sama ditolak", () => {
     expect(canChangeRole(admin, mahasiswa, "STUDENT")).toBe(false);
     expect(canChangeRole(admin, asisten, "ASSISTANT")).toBe(false);
+  });
+});
+
+describe("penghapusan permanen akun", () => {
+  const mahasiswa = { id: "user-dimas", role: "STUDENT" as const };
+  const asisten = { id: "user-asisten-a", role: "ASSISTANT" as const };
+  const superAdminLain = { id: "user-admin-2", role: "SUPER_ADMIN" as const };
+
+  it("admin dapat menghapus mahasiswa dan asisten", () => {
+    expect(canDeleteUser(admin, mahasiswa)).toBe(true);
+    expect(canDeleteUser(admin, asisten)).toBe(true);
+  });
+
+  it("mahasiswa tidak dapat menghapus siapa pun", () => {
+    expect(canDeleteUser(studentA, mahasiswa)).toBe(false);
+    expect(canDeleteUser(studentA, studentB.user)).toBe(false);
+  });
+
+  it("asisten tidak dapat menghapus mahasiswanya", () => {
+    // Menghapus akun menghancurkan riwayat nilai; hanya admin yang boleh.
+    expect(canDeleteUser(assistantA, mahasiswa)).toBe(false);
+  });
+
+  it("tidak seorang pun dapat menghapus akunnya sendiri", () => {
+    expect(
+      canDeleteUser(admin, { id: admin.user.id, role: "SUPER_ADMIN" }),
+    ).toBe(false);
+    expect(canDeleteUser(studentA, studentA.user)).toBe(false);
+  });
+
+  it("akun SUPER_ADMIN lain tidak dapat dihapus lewat UI", () => {
+    expect(canDeleteUser(admin, superAdminLain)).toBe(false);
   });
 });
 

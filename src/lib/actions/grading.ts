@@ -11,7 +11,7 @@ import {
   canViewStudentData,
 } from "@/lib/auth/policy";
 import { getAssignment } from "@/lib/db/assignments";
-import { listClassMembers } from "@/lib/db/courses";
+import { getClass, listClassMembers } from "@/lib/db/courses";
 import { findRepository } from "@/lib/db/repositories";
 import { refreshRepository } from "@/lib/grading/sync";
 import { runAction, safePath, withResult } from "@/lib/actions/result";
@@ -76,8 +76,18 @@ export async function refreshClassAction(formData: FormData) {
       "Anda bukan asisten kelas ini.",
     );
 
+    const klass = await getClass(input.classId);
+    if (!klass) throw new Error("Kelas tidak ditemukan.");
+
     const assignment = await getAssignment(input.assignmentId);
     if (!assignment) throw new Error("Tugas tidak ditemukan.");
+
+    // Pasangan kelas+tugas ikut diverifikasi, sama seperti
+    // provisionClassAction. Tanpa ini, assignmentId dari mata kuliah lain
+    // diterima begitu saja walau efeknya nihil.
+    if (assignment.course_id !== klass.course_id) {
+      throw new Error("Tugas ini bukan milik mata kuliah kelas tersebut.");
+    }
 
     const members = await listClassMembers(input.classId, "STUDENT");
     const failures: string[] = [];

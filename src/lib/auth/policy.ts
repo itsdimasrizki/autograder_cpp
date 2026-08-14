@@ -154,6 +154,27 @@ export function canChangeRole(
   return nextRole !== target.role;
 }
 
+/**
+ * Menghapus permanen sebuah akun pengguna.
+ *
+ * Penghapusan ini merambat (ON DELETE CASCADE) ke keanggotaan kelas,
+ * student_repositories, dan submissions — jadi seluruh riwayat nilai orang
+ * tersebut ikut hilang dan tidak dapat dikembalikan. Karena itu aturannya
+ * dibuat seketat perubahan role:
+ *   - hanya SUPER_ADMIN,
+ *   - tidak boleh menghapus diri sendiri,
+ *   - tidak boleh menghapus SUPER_ADMIN lain.
+ */
+export function canDeleteUser(
+  ctx: AccessContext,
+  target: { id: string; role: UserRole },
+): boolean {
+  if (!isSuperAdmin(ctx)) return false;
+  if (ctx.user.id === target.id) return false;
+  if (target.role === "SUPER_ADMIN") return false;
+  return true;
+}
+
 // -----------------------------------------------------------------------------
 // Assignment
 // -----------------------------------------------------------------------------
