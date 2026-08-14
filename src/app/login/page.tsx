@@ -7,17 +7,26 @@ export const dynamic = "force-dynamic";
 const messages: Record<string, string> = {
   state_tidak_valid: "Sesi login kedaluwarsa. Silakan coba lagi.",
   code_tidak_ada: "GitHub tidak mengirim kode otorisasi. Silakan coba lagi.",
+  otorisasi_dibatalkan:
+    "Otorisasi GitHub dibatalkan. Tekan tombol di bawah untuk mencoba lagi.",
+  profil_gagal:
+    "Profil GitHub Anda tidak dapat dibaca. Silakan coba lagi beberapa saat.",
+  penyimpanan_gagal:
+    "Akun Anda tidak dapat disimpan. Tunjukkan pesan ini ke asisten praktikum.",
   login_gagal: "Login gagal. Hubungi asisten bila terus berulang.",
 };
 
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; next?: string }>;
 }) {
   if (await getCurrentUser()) redirect("/dashboard");
 
-  const { error } = await searchParams;
+  const { error, next } = await searchParams;
+  const loginHref = next
+    ? `/api/auth/github?next=${encodeURIComponent(next)}`
+    : "/api/auth/github";
 
   return (
     <div className="flex min-h-screen items-center justify-center px-4">
@@ -37,7 +46,7 @@ export default async function LoginPage({
         )}
 
         <a
-          href="/api/auth/github"
+          href={loginHref}
           className="mt-5 flex w-full items-center justify-center rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700"
         >
           Masuk dengan GitHub

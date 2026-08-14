@@ -57,6 +57,8 @@ export type AssignmentTemplate = {
   owner: string;
   repo: string;
   description: string | null;
+  /** Soft delete: template yang diarsipkan tidak muncul di pilihan tugas baru. */
+  archived_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -73,6 +75,8 @@ export type Assignment = {
   max_attempts: number | null;
   published: boolean;
   scoring_mode: ScoringMode;
+  /** Soft delete: diisi saat tugas diarsipkan karena sudah punya histori nilai. */
+  archived_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -113,6 +117,31 @@ export type Submission = {
   updated_at: string;
 }
 
+/**
+ * Tautan undangan kelas. `token_hash` adalah SHA-256 dari token asli; token
+ * aslinya hanya pernah ada di URL yang dibagikan asisten.
+ */
+export type ClassJoinLink = {
+  id: string;
+  class_id: string;
+  course_id: string;
+  token_hash: string;
+  created_by: string | null;
+  created_at: string;
+  expires_at: string | null;
+  revoked_at: string | null;
+  revoked_by: string | null;
+}
+
+export type RoleChangeLog = {
+  id: string;
+  actor_user_id: string | null;
+  target_user_id: string | null;
+  from_role: UserRole;
+  to_role: UserRole;
+  created_at: string;
+}
+
 export type TestResult = {
   id: string;
   submission_id: string;
@@ -144,6 +173,8 @@ export type Database = {
       student_repositories: Table<StudentRepository>;
       submissions: Table<Submission>;
       test_results: Table<TestResult>;
+      class_join_links: Table<ClassJoinLink>;
+      role_change_log: Table<RoleChangeLog>;
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;

@@ -3,7 +3,13 @@ import type { ReactNode } from "react";
 import type { User } from "@/lib/db/types";
 import { Badge } from "@/components/ui";
 
-/** Kerangka halaman: navigasi atas + konten. Tautan menyesuaikan role. */
+/**
+ * Kerangka halaman: navigasi atas + konten.
+ *
+ * Tautan menyesuaikan role, tetapi ini semata kenyamanan — setiap halaman
+ * tetap memeriksa haknya sendiri di server, sehingga menebak URL tidak
+ * memberi akses apa pun.
+ */
 export function Shell({
   user,
   children,
@@ -16,7 +22,11 @@ export function Shell({
     { href: "/courses", label: "Mata Kuliah" },
   ];
   if (user.role === "SUPER_ADMIN") {
-    links.push({ href: "/admin", label: "Admin" });
+    links.push(
+      { href: "/templates", label: "Template" },
+      { href: "/users", label: "Pengguna" },
+      { href: "/admin", label: "Admin" },
+    );
   }
 
   return (

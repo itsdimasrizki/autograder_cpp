@@ -40,15 +40,18 @@ export async function buildStudentOverview(params: {
   userId: string;
   courseIds: string[];
 }): Promise<StudentAssignmentView[]> {
-  const [courses, repositories, submissions] = await Promise.all([
-    listCoursesByIds(params.courseIds),
-    listRepositoriesForUser(params.userId),
-    listSubmissionsForUser(params.userId),
-  ]);
-
-  const assignmentLists = await Promise.all(
-    params.courseIds.map((courseId) => listAssignments(courseId)),
-  );
+  // Keempatnya hanya bergantung pada parameter, tidak saling bergantung, jadi
+  // dijalankan dalam satu gelombang. Sebelumnya daftar tugas menunggu ketiga
+  // query di atas selesai lebih dulu tanpa alasan.
+  const [courses, repositories, submissions, assignmentLists] =
+    await Promise.all([
+      listCoursesByIds(params.courseIds),
+      listRepositoriesForUser(params.userId),
+      listSubmissionsForUser(params.userId),
+      Promise.all(
+        params.courseIds.map((courseId) => listAssignments(courseId)),
+      ),
+    ]);
 
   const assignments = assignmentLists
     .flat()

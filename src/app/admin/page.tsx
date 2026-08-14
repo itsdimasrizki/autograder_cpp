@@ -2,21 +2,16 @@ import Link from "next/link";
 import { requireRole } from "@/lib/auth/current-user";
 import { listAllCourses, listClasses } from "@/lib/db/courses";
 import { listTemplates } from "@/lib/db/assignments";
-import { listUsers } from "@/lib/db/users";
+import { countUsersByRole } from "@/lib/db/users";
 import { createCourseAction } from "@/lib/actions/courses";
-import { createTemplateAction } from "@/lib/actions/assignments";
-import { setRoleAction } from "@/lib/actions/admin";
 import { Shell } from "@/components/shell";
 import {
-  Badge,
   Button,
   Card,
   Empty,
   ErrorNote,
   Field,
   PageHeader,
-  Table,
-  Td,
   inputClass,
 } from "@/components/ui";
 
@@ -31,10 +26,10 @@ export default async function AdminPage({
   const user = await requireRole("SUPER_ADMIN");
   const { error } = await searchParams;
 
-  const [courses, templates, users] = await Promise.all([
+  const [courses, templates, userCounts] = await Promise.all([
     listAllCourses(),
     listTemplates(),
-    listUsers(),
+    countUsersByRole(),
   ]);
 
   const classesByCourse = await Promise.all(
@@ -84,50 +79,47 @@ export default async function AdminPage({
             </form>
           </Card>
 
-          <Card title="Daftarkan Repository Template">
-            <form action={createTemplateAction} className="space-y-3">
-              <Field label="Nama template">
-                <input
-                  name="name"
-                  required
-                  className={inputClass}
-                  placeholder="Praktikum 01 Template"
-                />
-              </Field>
-              <Field label="Owner (organisasi/pengguna GitHub)">
-                <input
-                  name="owner"
-                  required
-                  className={inputClass}
-                  placeholder="nama-organisasi"
-                />
-              </Field>
-              <Field
-                label="Nama repository"
-                hint="Repository harus ditandai sebagai Template di GitHub."
-              >
-                <input
-                  name="repo"
-                  required
-                  className={inputClass}
-                  placeholder="praktikum-01-template"
-                />
-              </Field>
-              <Button type="submit">Daftarkan</Button>
-            </form>
+          <Card
+            title="Ringkasan"
+            action={
+              <Link href="/users" className="text-sm text-slate-700 hover:underline">
+                Kelola pengguna
+              </Link>
+            }
+          >
+            <dl className="grid grid-cols-2 gap-3 text-sm">
+              <div>
+                <dt className="text-slate-500">Mahasiswa</dt>
+                <dd className="text-lg font-semibold text-slate-900">
+                  {userCounts.STUDENT}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-slate-500">Asisten</dt>
+                <dd className="text-lg font-semibold text-slate-900">
+                  {userCounts.ASSISTANT}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-slate-500">Admin</dt>
+                <dd className="text-lg font-semibold text-slate-900">
+                  {userCounts.SUPER_ADMIN}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-slate-500">Template</dt>
+                <dd className="text-lg font-semibold text-slate-900">
+                  {templates.length}
+                </dd>
+              </div>
+            </dl>
 
-            {templates.length > 0 && (
-              <ul className="mt-4 space-y-1 text-sm text-slate-700">
-                {templates.map((template) => (
-                  <li key={template.id}>
-                    {template.name}{" "}
-                    <span className="font-mono text-xs text-slate-500">
-                      {template.owner}/{template.repo}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
+            <Link
+              href="/templates"
+              className="mt-4 inline-block text-sm text-slate-700 hover:underline"
+            >
+              Kelola repository template →
+            </Link>
           </Card>
         </div>
 
@@ -175,36 +167,6 @@ export default async function AdminPage({
           )}
         </Card>
 
-        <Card title="Pengguna">
-          <Table head={["Nama", "GitHub", "Role", "Ubah role"]}>
-            {users.map((row) => (
-              <tr key={row.id}>
-                <Td>{row.display_name ?? row.github_login}</Td>
-                <Td className="text-slate-600">@{row.github_login}</Td>
-                <Td>
-                  <Badge value={row.role} />
-                </Td>
-                <Td>
-                  <form action={setRoleAction} className="flex gap-2">
-                    <input type="hidden" name="userId" value={row.id} />
-                    <select
-                      name="role"
-                      defaultValue={row.role}
-                      className="rounded border border-slate-300 px-2 py-1 text-sm"
-                    >
-                      <option value="STUDENT">STUDENT</option>
-                      <option value="ASSISTANT">ASSISTANT</option>
-                      <option value="SUPER_ADMIN">SUPER_ADMIN</option>
-                    </select>
-                    <Button type="submit" variant="secondary">
-                      Simpan
-                    </Button>
-                  </form>
-                </Td>
-              </tr>
-            ))}
-          </Table>
-        </Card>
       </div>
     </Shell>
   );

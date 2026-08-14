@@ -5,18 +5,28 @@ import { loadAccessContext } from "@/lib/auth/authorize";
 import {
   canAssignAssistants,
   canManageClassRoster,
+  canManageJoinLink,
   canViewClass,
 } from "@/lib/auth/policy";
 import { getClass, getCourse, listClassMembers } from "@/lib/db/courses";
 import { listAssignments } from "@/lib/db/assignments";
+import { getActiveJoinLink } from "@/lib/db/join-links";
+import { buildJoinUrl, joinLinkStatus } from "@/lib/auth/join-token";
+import { env } from "@/lib/env";
 import {
   addStudentAction,
   assignAssistantAction,
   removeMemberAction,
 } from "@/lib/actions/courses";
+import {
+  generateJoinLinkAction,
+  revokeJoinLinkAction,
+} from "@/lib/actions/join";
 import { Shell } from "@/components/shell";
 import { Forbidden } from "@/components/forbidden";
+import { ConfirmButton, CopyField } from "@/components/confirm";
 import {
+  Badge,
   Button,
   Card,
   Empty,
@@ -25,6 +35,7 @@ import {
   PageHeader,
   Table,
   Td,
+  formatDate,
   inputClass,
 } from "@/components/ui";
 
@@ -35,10 +46,10 @@ export default async function ClassPage({
   searchParams,
 }: {
   params: Promise<{ classId: string }>;
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; token?: string }>;
 }) {
   const { classId } = await params;
-  const { error } = await searchParams;
+  const { error, token } = await searchParams;
 
   const user = await requireUser();
   const ctx = await loadAccessContext(user);
@@ -47,14 +58,17 @@ export default async function ClassPage({
   if (!klass) notFound();
   if (!canViewClass(ctx, klass.id)) return <Forbidden user={user} />;
 
-  const [course, students, assistants, assignments] = await Promise.all([
-    getCourse(klass.course_id),
-    listClassMembers(klass.id, "STUDENT"),
-    listClassMembers(klass.id, "ASSISTANT"),
-    listAssignments(klass.course_id),
-  ]);
-
   const canEdit = canManageClassRoster(ctx, klass.id);
+  const canShareLink = canManageJoinLink(ctx, klass.id);
+
+  const [course, students, assistants, assignments, joinLink] =
+    await Promise.all([
+      getCourse(klass.course_id),
+      listClassMembers(klass.id, "STUDENT"),
+      listClassMembers(klass.id, "ASSISTANT"),
+      listAssignments(klass.course_id),
+      canShareLink ? getActiveJoinLink(klass.id) : Promise.resolve(null),
+    ]);
 
   return (
     <Shell user={user}>
@@ -70,6 +84,80 @@ export default async function ClassPage({
       )}
 
       <div className="space-y-6">
+        {canShareLink && (
+          <Card title="Tautan Undangan Kelas">
+            {token ? (
+              // Satu-satunya saat token asli terlihat: database hanya menyimpan hash.
+              <div className="space-y-2">
+                <p className="text-sm text-slate-700">
+                  Tautan baru dibuat. <strong>Salin sekarang</strong> — token
+                  hanya ditampilkan kali ini.
+                </p>
+                <CopyField value={buildJoinUrl(env.appUrl, token)} />
+              </div>
+            ) : joinLink ? (
+              <div className="space-y-2">
+                <p className="text-sm text-slate-700">
+                  Kelas ini punya tautan undangan aktif{" "}
+                  <Badge value={joinLinkStatus(joinLink)} /> dibuat{" "}
+                  {formatDate(joinLink.created_at)}
+                  {joinLink.expires_at
+                    ? `, berlaku sampai ${formatDate(joinLink.expires_at)}`
+                    : ", tanpa masa berlaku"}
+                  .
+                </p>
+                <p className="text-sm text-slate-600">
+                  Isi tautannya tidak dapat ditampilkan lagi karena hanya
+                  hash-nya yang disimpan. Buat ulang bila tautannya hilang.
+                </p>
+              </div>
+            ) : (
+              <Empty>
+                Belum ada tautan undangan. Mahasiswa masih bisa ditambahkan
+                manual di bawah.
+              </Empty>
+            )}
+
+            <div className="mt-4 flex flex-wrap items-end gap-3">
+              <form action={generateJoinLinkAction} className="flex items-end gap-2">
+                <input type="hidden" name="classId" value={klass.id} />
+                <Field
+                  label="Berlaku (hari)"
+                  hint="Kosongkan untuk tanpa batas waktu."
+                >
+                  <input
+                    name="expiresInDays"
+                    type="number"
+                    min={1}
+                    max={365}
+                    className={`${inputClass} w-32`}
+                    placeholder="—"
+                  />
+                </Field>
+                {joinLink ? (
+                  <ConfirmButton
+                    variant="secondary"
+                    message="Buat ulang tautan? Tautan lama langsung tidak berlaku."
+                  >
+                    Buat ulang
+                  </ConfirmButton>
+                ) : (
+                  <Button type="submit">Buat tautan</Button>
+                )}
+              </form>
+
+              {joinLink && (
+                <form action={revokeJoinLinkAction}>
+                  <input type="hidden" name="classId" value={klass.id} />
+                  <ConfirmButton message="Cabut tautan undangan? Tautan lama tidak akan bisa dipakai lagi.">
+                    Cabut
+                  </ConfirmButton>
+                </form>
+              )}
+            </div>
+          </Card>
+        )}
+
         <Card title="Gradebook per Tugas">
           {assignments.length === 0 ? (
             <Empty>Belum ada tugas pada mata kuliah ini.</Empty>
@@ -120,9 +208,11 @@ export default async function ClassPage({
                           name="userId"
                           value={member.user.id}
                         />
-                        <Button type="submit" variant="danger">
+                        <ConfirmButton
+                          message={`Keluarkan @${member.user.github_login} dari kelas ini? Repository dan nilainya tidak ikut terhapus.`}
+                        >
                           Keluarkan
-                        </Button>
+                        </ConfirmButton>
                       </form>
                     )}
                   </Td>

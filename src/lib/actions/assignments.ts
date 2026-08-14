@@ -7,12 +7,25 @@ import { z } from "zod";
 import { requireAccessContext } from "@/lib/auth/authorize";
 import { assert, canManageAssignment } from "@/lib/auth/policy";
 import {
+  archiveAssignment,
+  countAssignmentFootprint,
   createAssignment,
   createTemplate,
+  deleteAssignment,
+  deleteTemplate,
   getAssignment,
+  getTemplate,
+  listAssignmentsUsingTemplate,
+  restoreAssignment,
   updateAssignment,
+  updateTemplate,
 } from "@/lib/db/assignments";
 import { isValidGitHubLogin } from "@/lib/github/naming";
+import {
+  canDeleteTemplate,
+  decideAssignmentDeletion,
+  describeTemplateDependents,
+} from "@/lib/lifecycle";
 import { runAction, withResult } from "@/lib/actions/result";
 
 const uuid = z.string().uuid("ID tidak valid.");
@@ -80,8 +93,10 @@ export async function createAssignmentAction(formData: FormData) {
     });
   });
 
-  revalidatePath(`/courses/${courseId}/assignments`);
-  redirect(withResult(`/courses/${courseId}/assignments`, message));
+  // courseId tetap kosong bila tugas tidak ditemukan; jangan bentuk URL rusak.
+  const target = courseId ? `/courses/${courseId}/assignments` : "/dashboard";
+  revalidatePath(target);
+  redirect(withResult(target, message));
 }
 
 export async function updateAssignmentAction(formData: FormData) {
@@ -146,6 +161,76 @@ export async function togglePublishAction(formData: FormData) {
   redirect(withResult(`/assignments/${assignmentId}`, message));
 }
 
+/**
+ * Menghapus sebuah tugas.
+ *
+ * Perilaku default sengaja konservatif:
+ *   - kalau tugas SUDAH punya repository mahasiswa atau submission, tugas
+ *     hanya DIARSIPKAN (archived_at diisi). Repository GitHub mahasiswa tidak
+ *     disentuh dan seluruh histori nilai tetap utuh — hanya hilang dari daftar;
+ *   - kalau belum ada jejak apa pun, baris tugas dihapus permanen.
+ *
+ * Dengan begitu tidak ada nilai yang lenyap diam-diam.
+ */
+export async function deleteAssignmentAction(formData: FormData) {
+  const assignmentId = String(formData.get("assignmentId") ?? "");
+  let courseId = "";
+
+  const message = await runAction(async () => {
+    const ctx = await requireAccessContext();
+    assert(canManageAssignment(ctx), "Hanya admin yang dapat menghapus tugas.");
+
+    const id = uuid.parse(assignmentId);
+    const assignment = await getAssignment(id);
+    if (!assignment) throw new Error("Tugas tidak ditemukan.");
+    courseId = assignment.course_id;
+
+    const footprint = await countAssignmentFootprint(id);
+
+    if (decideAssignmentDeletion(footprint) === "ARSIPKAN") {
+      await archiveAssignment(id);
+      throw new Error(
+        `Tugas diarsipkan, bukan dihapus, karena sudah memiliki ` +
+          `${footprint.repositories} repository dan ${footprint.submissions} submission. ` +
+          "Repository GitHub dan riwayat nilai tetap utuh.",
+      );
+    }
+
+    await deleteAssignment(id);
+  });
+
+  // courseId tetap kosong bila tugas tidak ditemukan; jangan bentuk URL rusak.
+  const target = courseId ? `/courses/${courseId}/assignments` : "/dashboard";
+  revalidatePath(target);
+  redirect(withResult(target, message));
+}
+
+/** Mengembalikan tugas yang diarsipkan ke daftar aktif. */
+export async function restoreAssignmentAction(formData: FormData) {
+  const assignmentId = String(formData.get("assignmentId") ?? "");
+  let courseId = "";
+
+  const message = await runAction(async () => {
+    const ctx = await requireAccessContext();
+    assert(
+      canManageAssignment(ctx),
+      "Hanya admin yang dapat memulihkan tugas.",
+    );
+
+    const id = uuid.parse(assignmentId);
+    const assignment = await getAssignment(id);
+    if (!assignment) throw new Error("Tugas tidak ditemukan.");
+    courseId = assignment.course_id;
+
+    await restoreAssignment(id);
+  });
+
+  // courseId tetap kosong bila tugas tidak ditemukan; jangan bentuk URL rusak.
+  const target = courseId ? `/courses/${courseId}/assignments` : "/dashboard";
+  revalidatePath(target);
+  redirect(withResult(target, message));
+}
+
 /** Mendaftarkan repository template milik instruktur. */
 export async function createTemplateAction(formData: FormData) {
   const message = await runAction(async () => {
@@ -185,5 +270,74 @@ export async function createTemplateAction(formData: FormData) {
   });
 
   revalidatePath("/admin");
-  redirect(withResult("/admin", message));
+  revalidatePath("/templates");
+  redirect(withResult("/templates", message));
+}
+
+/** Menyunting metadata template. Owner/repo tidak diubah di sini. */
+export async function updateTemplateAction(formData: FormData) {
+  const templateId = String(formData.get("templateId") ?? "");
+
+  const message = await runAction(async () => {
+    const ctx = await requireAccessContext();
+    assert(
+      canManageAssignment(ctx),
+      "Hanya admin yang dapat mengubah template.",
+    );
+
+    const input = z
+      .object({
+        templateId: uuid,
+        name: z.string().trim().min(1, "Nama template wajib diisi.").max(100),
+        description: z.string().trim().max(500).optional(),
+      })
+      .parse({
+        templateId,
+        name: formData.get("name"),
+        description: formData.get("description") || undefined,
+      });
+
+    await updateTemplate(input.templateId, {
+      name: input.name,
+      description: input.description ?? null,
+    });
+  });
+
+  revalidatePath("/templates");
+  redirect(withResult(`/templates/${templateId}`, message));
+}
+
+/**
+ * Menghapus pendaftaran template dari aplikasi.
+ *
+ * PENTING: repository GitHub fisiknya tidak pernah ikut terhapus — yang
+ * dihapus hanya catatan di database aplikasi.
+ *
+ * Penghapusan ditolak selama masih ada tugas aktif yang memakainya, dengan
+ * menyebut tugas mana saja, supaya penyediaan repository tidak diam-diam rusak.
+ */
+export async function deleteTemplateAction(formData: FormData) {
+  const message = await runAction(async () => {
+    const ctx = await requireAccessContext();
+    assert(
+      canManageAssignment(ctx),
+      "Hanya admin yang dapat menghapus template.",
+    );
+
+    const id = uuid.parse(String(formData.get("templateId") ?? ""));
+
+    const template = await getTemplate(id);
+    if (!template) throw new Error("Template tidak ditemukan.");
+
+    const dependents = await listAssignmentsUsingTemplate(id);
+    if (!canDeleteTemplate(dependents)) {
+      throw new Error(describeTemplateDependents(dependents));
+    }
+
+    await deleteTemplate(id);
+  });
+
+  revalidatePath("/templates");
+  revalidatePath("/admin");
+  redirect(withResult("/templates", message));
 }

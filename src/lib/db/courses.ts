@@ -23,6 +23,48 @@ export async function listMembershipsOf(userId: string): Promise<Membership[]> {
   return (data ?? []) as Membership[];
 }
 
+export interface UserClassLabel {
+  class_id: string;
+  class_name: string;
+  role: MemberRole;
+}
+
+/**
+ * Kelas yang diikuti sekumpulan pengguna, untuk kolom "Kelas" di halaman
+ * /users. Satu query untuk semua pengguna supaya tidak menjadi N+1.
+ */
+export async function listClassesForUsers(
+  userIds: string[],
+): Promise<Record<string, UserClassLabel[]>> {
+  if (userIds.length === 0) return {};
+
+  const { data, error } = await db()
+    .from("course_members")
+    .select("user_id, class_id, role, classes!inner(name)")
+    .in("user_id", userIds);
+  if (error) throw new Error(`Supabase: ${error.message}`);
+
+  const rows = (data ?? []) as unknown as Array<{
+    user_id: string;
+    class_id: string;
+    role: MemberRole;
+    classes: { name: string };
+  }>;
+
+  const grouped: Record<string, UserClassLabel[]> = {};
+  for (const row of rows) {
+    (grouped[row.user_id] ??= []).push({
+      class_id: row.class_id,
+      class_name: row.classes.name,
+      role: row.role,
+    });
+  }
+  for (const list of Object.values(grouped)) {
+    list.sort((a, b) => a.class_name.localeCompare(b.class_name));
+  }
+  return grouped;
+}
+
 export async function addMember(params: {
   courseId: string;
   classId: string;

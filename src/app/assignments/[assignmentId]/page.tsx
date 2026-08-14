@@ -9,17 +9,26 @@ import {
   isAssistantOfCourse,
   isSuperAdmin,
 } from "@/lib/auth/policy";
-import { getAssignment, getTemplate } from "@/lib/db/assignments";
+import {
+  getAssignment,
+  getTemplate,
+  listTemplates,
+} from "@/lib/db/assignments";
 import { getCourse, listClasses, listClassMembers } from "@/lib/db/courses";
 import { listRepositoriesForAssignment } from "@/lib/db/repositories";
 import { listSubmissions } from "@/lib/db/submissions";
 import { summarizeClass } from "@/lib/grading/gradebook";
 import { buildStudentOverview } from "@/lib/views/student-overview";
-import { togglePublishAction } from "@/lib/actions/assignments";
+import {
+  deleteAssignmentAction,
+  togglePublishAction,
+  updateAssignmentAction,
+} from "@/lib/actions/assignments";
 import { provisionClassAction } from "@/lib/actions/repositories";
 import { refreshClassAction, refreshStudentAction } from "@/lib/actions/grading";
 import { Shell } from "@/components/shell";
 import { Forbidden } from "@/components/forbidden";
+import { ConfirmButton } from "@/components/confirm";
 import { AssignmentCards } from "@/components/assignment-cards";
 import {
   Badge,
@@ -27,11 +36,25 @@ import {
   Card,
   Empty,
   ErrorNote,
+  Field,
   PageHeader,
   Table,
   Td,
   formatDate,
+  inputClass,
 } from "@/components/ui";
+
+/** <input type="datetime-local"> butuh "YYYY-MM-DDTHH:mm" waktu lokal. */
+function toLocalInputValue(iso: string | null): string {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return (
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
+    `T${pad(date.getHours())}:${pad(date.getMinutes())}`
+  );
+}
 
 export const dynamic = "force-dynamic";
 
@@ -52,13 +75,21 @@ export default async function AssignmentPage({
   if (!assignment) notFound();
   if (!canViewAssignment(ctx, assignment)) return <Forbidden user={user} />;
 
-  const course = await getCourse(assignment.course_id);
-  const template = assignment.template_id
-    ? await getTemplate(assignment.template_id)
-    : null;
-
   const isStaff =
     isSuperAdmin(ctx) || isAssistantOfCourse(ctx, assignment.course_id);
+  const canManage = canManageAssignment(ctx);
+
+  // Keempatnya hanya bergantung pada `assignment` dan `ctx` yang sudah ada,
+  // jadi diambil dalam satu gelombang. Daftar kelas dan template tetap hanya
+  // diambil untuk yang berhak, sehingga tidak ada data yang bocor ke mahasiswa.
+  const [course, template, allClasses, templates] = await Promise.all([
+    getCourse(assignment.course_id),
+    assignment.template_id
+      ? getTemplate(assignment.template_id)
+      : Promise.resolve(null),
+    isStaff ? listClasses(assignment.course_id) : Promise.resolve([]),
+    canManage ? listTemplates() : Promise.resolve([]),
+  ]);
 
   const header = (
     <PageHeader
@@ -74,7 +105,7 @@ export default async function AssignmentPage({
         </>
       }
       action={
-        canManageAssignment(ctx) ? (
+        canManage ? (
           <form action={togglePublishAction}>
             <input type="hidden" name="assignmentId" value={assignment.id} />
             <Button type="submit" variant="secondary">
@@ -198,7 +229,6 @@ export default async function AssignmentPage({
   // ---------------------------------------------------------------------------
   // Tampilan asisten/admin: gradebook per kelas.
   // ---------------------------------------------------------------------------
-  const allClasses = await listClasses(assignment.course_id);
   const visibleClasses = allClasses.filter((klass) =>
     canViewClass(ctx, klass.id),
   );
@@ -365,6 +395,131 @@ export default async function AssignmentPage({
         <Card>
           <Empty>Tidak ada kelas yang dapat Anda akses pada tugas ini.</Empty>
         </Card>
+      )}
+
+      {canManage && (
+        <div className="mt-6 space-y-6">
+          <Card title="Ubah Tugas">
+            <form
+              action={updateAssignmentAction}
+              className="grid gap-3 sm:grid-cols-2"
+            >
+              <input
+                type="hidden"
+                name="assignmentId"
+                value={assignment.id}
+              />
+
+              <Field label="Judul">
+                <input
+                  name="title"
+                  required
+                  minLength={3}
+                  maxLength={200}
+                  defaultValue={assignment.title}
+                  className={inputClass}
+                />
+              </Field>
+
+              <Field
+                label="Repository template"
+                hint="Mengubah template tidak mengubah repository yang sudah disediakan."
+              >
+                <select
+                  name="templateId"
+                  defaultValue={assignment.template_id ?? ""}
+                  className={inputClass}
+                >
+                  <option value="">— tanpa template —</option>
+                  {templates.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name} ({item.owner}/{item.repo})
+                    </option>
+                  ))}
+                </select>
+              </Field>
+
+              <div className="sm:col-span-2">
+                <Field label="Deskripsi (opsional)">
+                  <textarea
+                    name="description"
+                    rows={3}
+                    maxLength={5000}
+                    defaultValue={assignment.description ?? ""}
+                    className={inputClass}
+                  />
+                </Field>
+              </div>
+
+              <Field label="Nilai maksimal">
+                <input
+                  name="maxScore"
+                  type="number"
+                  min={1}
+                  max={1000}
+                  defaultValue={assignment.max_score}
+                  className={inputClass}
+                />
+              </Field>
+
+              <Field label="Tenggat (opsional)">
+                <input
+                  name="deadline"
+                  type="datetime-local"
+                  defaultValue={toLocalInputValue(assignment.deadline)}
+                  className={inputClass}
+                />
+              </Field>
+
+              <Field label="Percobaan maksimal (opsional)">
+                <input
+                  name="maxAttempts"
+                  type="number"
+                  min={1}
+                  defaultValue={assignment.max_attempts ?? ""}
+                  className={inputClass}
+                  placeholder="tanpa batas"
+                />
+              </Field>
+
+              <Field label="Mode penilaian">
+                <select
+                  name="scoringMode"
+                  defaultValue={assignment.scoring_mode}
+                  className={inputClass}
+                >
+                  <option value="BEST">Nilai terbaik</option>
+                  <option value="LATEST">Nilai terakhir</option>
+                </select>
+              </Field>
+
+              <div className="sm:col-span-2">
+                <Button type="submit">Simpan perubahan</Button>
+              </div>
+            </form>
+          </Card>
+
+          <Card title="Hapus Tugas">
+            <p className="text-sm text-slate-700">
+              Repository GitHub mahasiswa dan seluruh riwayat nilai{" "}
+              <strong>tidak ikut terhapus</strong>. Bila tugas ini sudah
+              memiliki repository atau submission, tugas hanya diarsipkan
+              sehingga hilang dari daftar tanpa menghapus data apa pun.
+            </p>
+            <form action={deleteAssignmentAction} className="mt-3">
+              <input
+                type="hidden"
+                name="assignmentId"
+                value={assignment.id}
+              />
+              <ConfirmButton
+                message={`Yakin ingin menghapus tugas "${assignment.title}"? Repository mahasiswa dan riwayat nilai tidak akan terhapus.`}
+              >
+                Hapus tugas
+              </ConfirmButton>
+            </form>
+          </Card>
+        </div>
       )}
     </Shell>
   );

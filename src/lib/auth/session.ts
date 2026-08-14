@@ -20,6 +20,8 @@ export interface SessionPayload {
 
 export const SESSION_COOKIE = "strukdat_session";
 export const OAUTH_STATE_COOKIE = "strukdat_oauth_state";
+/** Tujuan setelah login berhasil, mis. kembali ke /join/<token>. */
+export const OAUTH_RETURN_COOKIE = "strukdat_oauth_return";
 export const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7; // 7 hari
 
 function b64url(input: Buffer | string): string {

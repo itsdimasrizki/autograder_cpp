@@ -28,27 +28,33 @@ export default async function DashboardPage({
     .filter((m) => m.role === "ASSISTANT")
     .map((m) => m.class_id);
 
-  // Mahasiswa hanya pernah melihat datanya sendiri.
-  const overview =
-    studentCourseIds.length > 0
-      ? await buildStudentOverview({
-          ctx,
-          userId: user.id,
-          courseIds: studentCourseIds,
-        })
-      : [];
-
-  const assistantClasses = await Promise.all(
-    assistantClassIds.map((classId) => getClass(classId)),
-  );
-  const assistantCourses = await listCoursesByIds([
+  const assistantCourseIds = [
     ...new Set(
       ctx.memberships
         .filter((m) => m.role === "ASSISTANT")
         .map((m) => m.course_id),
     ),
-  ]);
-  const adminCourses = isSuperAdmin(ctx) ? await listAllCourses() : [];
+  ];
+
+  // Keempat kelompok query ini tidak saling bergantung — semuanya hanya butuh
+  // `ctx` yang sudah ada. Dijalankan berurutan, tiap halaman membayar latensi
+  // Supabase empat kali; satu gelombang cukup sekali.
+  //
+  // Mahasiswa tetap hanya pernah melihat datanya sendiri: penyaringan ada di
+  // buildStudentOverview lewat kebijakan terpusat, bukan di sini.
+  const [overview, assistantClasses, assistantCourses, adminCourses] =
+    await Promise.all([
+      studentCourseIds.length > 0
+        ? buildStudentOverview({
+            ctx,
+            userId: user.id,
+            courseIds: studentCourseIds,
+          })
+        : Promise.resolve([]),
+      Promise.all(assistantClassIds.map((classId) => getClass(classId))),
+      listCoursesByIds(assistantCourseIds),
+      isSuperAdmin(ctx) ? listAllCourses() : Promise.resolve([]),
+    ]);
 
   return (
     <Shell user={user}>
@@ -141,8 +147,10 @@ export default async function DashboardPage({
           !isSuperAdmin(ctx) && (
             <Card>
               <Empty>
-                Akun GitHub Anda (@{user.github_login}) belum terdaftar di kelas
-                mana pun. Hubungi asisten praktikum Anda.
+                Akun GitHub Anda (@{user.github_login}) berhasil dikenali,
+                tetapi belum terdaftar di kelas mana pun. Minta tautan undangan
+                kelas kepada asisten praktikum Anda, lalu buka tautan tersebut
+                untuk bergabung.
               </Empty>
             </Card>
           )}

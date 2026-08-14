@@ -5,9 +5,14 @@ import { loadAccessContext } from "@/lib/auth/authorize";
 import { canManageAssignment, canViewAssignment, canViewCourse } from "@/lib/auth/policy";
 import { getCourse } from "@/lib/db/courses";
 import { listAssignments, listTemplates } from "@/lib/db/assignments";
-import { createAssignmentAction } from "@/lib/actions/assignments";
+import {
+  createAssignmentAction,
+  deleteAssignmentAction,
+  restoreAssignmentAction,
+} from "@/lib/actions/assignments";
 import { Shell } from "@/components/shell";
 import { Forbidden } from "@/components/forbidden";
+import { ConfirmButton } from "@/components/confirm";
 import {
   Badge,
   Button,
@@ -41,11 +46,25 @@ export default async function AssignmentsPage({
   if (!course) notFound();
   if (!canViewCourse(ctx, course.id)) return <Forbidden user={user} />;
 
+  const canManage = canManageAssignment(ctx);
+
+  // Ketiganya saling lepas, jadi satu gelombang saja. Admin cukup mengambil
+  // daftar lengkap sekali lalu memilahnya di memori — dua query terpisah untuk
+  // aktif dan terarsip hanya menambah satu perjalanan bolak-balik.
+  const [allAssignments, templates] = await Promise.all([
+    listAssignments(course.id, { includeArchived: canManage }),
+    canManage ? listTemplates() : Promise.resolve([]),
+  ]);
+
   // Tugas yang belum diterbitkan disaring lewat kebijakan terpusat.
-  const assignments = (await listAssignments(course.id)).filter((assignment) =>
-    canViewAssignment(ctx, assignment),
+  const assignments = allAssignments
+    .filter((assignment) => assignment.archived_at === null)
+    .filter((assignment) => canViewAssignment(ctx, assignment));
+
+  // Tugas yang diarsipkan hanya terlihat oleh admin, terpisah dari daftar aktif.
+  const archived = allAssignments.filter(
+    (assignment) => assignment.archived_at !== null,
   );
-  const templates = canManageAssignment(ctx) ? await listTemplates() : [];
 
   return (
     <Shell user={user}>
@@ -92,12 +111,26 @@ export default async function AssignmentsPage({
                     </span>
                   </Td>
                   <Td>
-                    <Link
-                      href={`/assignments/${assignment.id}`}
-                      className="text-sm text-slate-700 hover:underline"
-                    >
-                      Detail
-                    </Link>
+                    <div className="flex items-center justify-end gap-3">
+                      <Link
+                        href={`/assignments/${assignment.id}`}
+                        className="text-sm text-slate-700 hover:underline"
+                      >
+                        Detail
+                      </Link>
+                      {canManage && (
+                        <form action={deleteAssignmentAction}>
+                          <input
+                            type="hidden"
+                            name="assignmentId"
+                            value={assignment.id}
+                          />
+                          <ConfirmButton message={`Yakin ingin menghapus tugas "${assignment.title}"? Repository mahasiswa dan riwayat nilai TIDAK ikut terhapus; bila tugas ini sudah punya submission, tugas hanya diarsipkan.`}>
+                            Hapus
+                          </ConfirmButton>
+                        </form>
+                      )}
+                    </div>
                   </Td>
                 </tr>
               ))}
@@ -105,7 +138,39 @@ export default async function AssignmentsPage({
           )}
         </Card>
 
-        {canManageAssignment(ctx) && (
+        {archived.length > 0 && (
+          <Card title="Tugas Diarsipkan">
+            <p className="mb-3 text-sm text-slate-600">
+              Tugas berikut disembunyikan dari mahasiswa. Repository dan seluruh
+              riwayat nilainya tetap tersimpan.
+            </p>
+            <Table head={["#", "Judul", "Diarsipkan", ""]}>
+              {archived.map((assignment) => (
+                <tr key={assignment.id}>
+                  <Td className="text-slate-500">
+                    {assignment.meeting_number}
+                  </Td>
+                  <Td>{assignment.title}</Td>
+                  <Td>{formatDate(assignment.archived_at)}</Td>
+                  <Td className="text-right">
+                    <form action={restoreAssignmentAction}>
+                      <input
+                        type="hidden"
+                        name="assignmentId"
+                        value={assignment.id}
+                      />
+                      <Button type="submit" variant="secondary">
+                        Pulihkan
+                      </Button>
+                    </form>
+                  </Td>
+                </tr>
+              ))}
+            </Table>
+          </Card>
+        )}
+
+        {canManage && (
           <Card title="Buat Tugas Baru">
             <form
               action={createAssignmentAction}

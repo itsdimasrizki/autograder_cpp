@@ -3,9 +3,12 @@ import {
   AuthorizationError,
   assert,
   canAssignAssistants,
+  canChangeRole,
+  canListAllUsers,
   canManageAssignment,
   canManageClassRoster,
   canManageCourse,
+  canManageJoinLink,
   canProvisionRepository,
   canViewAssignment,
   canViewClass,
@@ -201,6 +204,83 @@ describe("keterlihatan tugas", () => {
       memberships: [membership("class-x", "STUDENT", OTHER_COURSE)],
     };
     expect(canViewAssignment(lain, publishedAssignment)).toBe(false);
+  });
+});
+
+describe("tautan undangan kelas", () => {
+  it("admin dapat membuat tautan untuk kelas mana pun", () => {
+    expect(canManageJoinLink(admin, CLASS_A)).toBe(true);
+    expect(canManageJoinLink(admin, CLASS_B)).toBe(true);
+  });
+
+  it("asisten hanya dapat membuat tautan untuk kelas yang ditugaskan", () => {
+    expect(canManageJoinLink(assistantA, CLASS_A)).toBe(true);
+    expect(canManageJoinLink(assistantA, CLASS_B)).toBe(false);
+  });
+
+  it("mahasiswa tidak pernah dapat membuat tautan undangan", () => {
+    expect(canManageJoinLink(studentA, CLASS_A)).toBe(false);
+    expect(canManageJoinLink(studentA, CLASS_B)).toBe(false);
+  });
+
+  it("asisten tanpa penugasan kelas tidak dapat membuat tautan", () => {
+    expect(canManageJoinLink(assistantTanpaKelas, CLASS_A)).toBe(false);
+  });
+});
+
+describe("daftar seluruh pengguna", () => {
+  it("hanya admin yang boleh melihat daftar seluruh pengguna", () => {
+    expect(canListAllUsers(admin)).toBe(true);
+    expect(canListAllUsers(assistantA)).toBe(false);
+    expect(canListAllUsers(studentA)).toBe(false);
+  });
+});
+
+describe("perubahan role", () => {
+  const mahasiswa = { id: "user-dimas", role: "STUDENT" as const };
+  const asisten = { id: "user-asisten-a", role: "ASSISTANT" as const };
+  const superAdminLain = { id: "user-admin-2", role: "SUPER_ADMIN" as const };
+
+  it("admin dapat mempromosikan mahasiswa menjadi asisten", () => {
+    expect(canChangeRole(admin, mahasiswa, "ASSISTANT")).toBe(true);
+  });
+
+  it("admin dapat menurunkan asisten menjadi mahasiswa", () => {
+    expect(canChangeRole(admin, asisten, "STUDENT")).toBe(true);
+  });
+
+  it("mahasiswa tidak dapat mengubah role dirinya sendiri", () => {
+    expect(canChangeRole(studentA, mahasiswa, "ASSISTANT")).toBe(false);
+    expect(canChangeRole(studentA, mahasiswa, "SUPER_ADMIN")).toBe(false);
+  });
+
+  it("asisten tidak dapat mengangkat dirinya menjadi SUPER_ADMIN", () => {
+    expect(canChangeRole(assistantA, asisten, "SUPER_ADMIN")).toBe(false);
+  });
+
+  it("asisten tidak dapat mengubah role orang lain", () => {
+    expect(canChangeRole(assistantA, mahasiswa, "ASSISTANT")).toBe(false);
+  });
+
+  it("admin tidak dapat mengubah role dirinya sendiri", () => {
+    expect(
+      canChangeRole(admin, { id: admin.user.id, role: "SUPER_ADMIN" }, "STUDENT"),
+    ).toBe(false);
+  });
+
+  it("role SUPER_ADMIN milik orang lain tidak dapat diturunkan lewat UI", () => {
+    expect(canChangeRole(admin, superAdminLain, "STUDENT")).toBe(false);
+    expect(canChangeRole(admin, superAdminLain, "ASSISTANT")).toBe(false);
+  });
+
+  it("tidak ada jalan mengangkat siapa pun menjadi SUPER_ADMIN lewat UI", () => {
+    expect(canChangeRole(admin, mahasiswa, "SUPER_ADMIN")).toBe(false);
+    expect(canChangeRole(admin, asisten, "SUPER_ADMIN")).toBe(false);
+  });
+
+  it("mengubah role menjadi role yang sama ditolak", () => {
+    expect(canChangeRole(admin, mahasiswa, "STUDENT")).toBe(false);
+    expect(canChangeRole(admin, asisten, "ASSISTANT")).toBe(false);
   });
 });
 

@@ -108,6 +108,52 @@ export function canAssignAssistants(ctx: AccessContext): boolean {
   return isSuperAdmin(ctx);
 }
 
+/**
+ * Membuat / mencabut tautan undangan kelas.
+ *
+ * Sengaja memakai aturan yang sama dengan pengelolaan roster: siapa pun yang
+ * boleh menambahkan mahasiswa secara manual ke kelas ini juga boleh membuat
+ * tautan undangannya. Mahasiswa tidak pernah termasuk.
+ */
+export function canManageJoinLink(
+  ctx: AccessContext,
+  classId: string,
+): boolean {
+  return canManageClassRoster(ctx, classId);
+}
+
+// -----------------------------------------------------------------------------
+// Pengelolaan pengguna
+// -----------------------------------------------------------------------------
+
+/** Daftar seluruh pengguna aplikasi: hanya SUPER_ADMIN. */
+export function canListAllUsers(ctx: AccessContext): boolean {
+  return isSuperAdmin(ctx);
+}
+
+/**
+ * Bolehkah `ctx` mengubah role `target` menjadi `nextRole`?
+ *
+ * Aturan:
+ *   - hanya SUPER_ADMIN yang boleh mengubah role sama sekali;
+ *   - tidak seorang pun boleh mengubah role dirinya sendiri (mencegah admin
+ *     terakhir mengunci diri, sekaligus mencegah eskalasi diri);
+ *   - role SUPER_ADMIN yang sudah ada tidak boleh diturunkan lewat UI —
+ *     pencabutannya dilakukan lewat GITHUB_SUPER_ADMINS + database;
+ *   - promosi menjadi SUPER_ADMIN tidak disediakan lewat UI.
+ */
+export function canChangeRole(
+  ctx: AccessContext,
+  target: { id: string; role: UserRole },
+  nextRole: UserRole,
+): boolean {
+  if (!isSuperAdmin(ctx)) return false;
+  if (ctx.user.id === target.id) return false;
+  if (target.role === "SUPER_ADMIN") return false;
+  if (nextRole === "SUPER_ADMIN") return false;
+  return nextRole !== target.role;
+}
+
 // -----------------------------------------------------------------------------
 // Assignment
 // -----------------------------------------------------------------------------
