@@ -5,6 +5,7 @@ import { loadAccessContext } from "@/lib/auth/authorize";
 import { canManageAssignment, canViewAssignment, canViewCourse } from "@/lib/auth/policy";
 import { getCourse } from "@/lib/db/courses";
 import { listAssignments, listTemplates } from "@/lib/db/assignments";
+import { SCORING_MODE_LABEL } from "@/lib/grading/gradebook";
 import {
   createAssignmentAction,
   deleteAssignmentAction,
@@ -101,7 +102,7 @@ export default async function AssignmentsPage({
                     </Link>
                   </Td>
                   <Td>{formatDate(assignment.deadline)}</Td>
-                  <Td>{assignment.scoring_mode}</Td>
+                  <Td>{SCORING_MODE_LABEL[assignment.scoring_mode]}</Td>
                   <Td>
                     <Badge
                       value={assignment.published ? "READY" : "PENDING"}
@@ -254,10 +255,14 @@ export default async function AssignmentsPage({
                 />
               </Field>
 
-              <Field label="Mode penilaian">
+              <Field
+                label="Mode penilaian"
+                hint="Nilai pertama memakai hasil percobaan pertama yang dinilai — perbaikan setelahnya tidak mengubah nilai."
+              >
                 <select name="scoringMode" className={inputClass}>
                   <option value="BEST">Nilai terbaik</option>
                   <option value="LATEST">Nilai terakhir</option>
+                  <option value="FIRST">Nilai pertama</option>
                 </select>
               </Field>
 

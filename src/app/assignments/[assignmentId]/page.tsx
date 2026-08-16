@@ -17,7 +17,7 @@ import {
 import { getCourse, listClasses, listClassMembers } from "@/lib/db/courses";
 import { listRepositoriesForAssignment } from "@/lib/db/repositories";
 import { listSubmissions } from "@/lib/db/submissions";
-import { summarizeClass } from "@/lib/grading/gradebook";
+import { SCORING_MODE_LABEL, summarizeClass } from "@/lib/grading/gradebook";
 import { buildStudentOverview } from "@/lib/views/student-overview";
 import {
   deleteAssignmentAction,
@@ -98,7 +98,7 @@ export default async function AssignmentPage({
         <>
           Pertemuan {assignment.meeting_number} · {course?.name ?? ""} · Nilai
           maksimal {assignment.max_score} · Mode{" "}
-          {assignment.scoring_mode === "BEST" ? "terbaik" : "terakhir"}
+          {SCORING_MODE_LABEL[assignment.scoring_mode]}
           {assignment.deadline
             ? ` · Tenggat ${formatDate(assignment.deadline)}`
             : ""}
@@ -482,7 +482,10 @@ export default async function AssignmentPage({
                 />
               </Field>
 
-              <Field label="Mode penilaian">
+              <Field
+                label="Mode penilaian"
+                hint="Boleh diubah kapan saja: nilai pertama, terbaik, dan terakhir semuanya tetap tersimpan, jadi berpindah mode tidak menghilangkan riwayat."
+              >
                 <select
                   name="scoringMode"
                   defaultValue={assignment.scoring_mode}
@@ -490,6 +493,7 @@ export default async function AssignmentPage({
                 >
                   <option value="BEST">Nilai terbaik</option>
                   <option value="LATEST">Nilai terakhir</option>
+                  <option value="FIRST">Nilai pertama</option>
                 </select>
               </Field>
 

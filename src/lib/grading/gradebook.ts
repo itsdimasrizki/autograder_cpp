@@ -4,13 +4,16 @@ import type { ScoringMode, Submission, SubmissionStatus } from "@/lib/db/types";
  * Ringkasan nilai. Murni: menerima daftar submission apa adanya dan
  * menghitung tampilan gradebook.
  *
- * Riwayat tidak pernah dibuang — nilai "terbaik" dan "terakhir" sama-sama
- * dihitung, dan mode penilaian tugas menentukan mana yang dipakai.
+ * Riwayat tidak pernah dibuang — nilai "pertama", "terbaik", dan "terakhir"
+ * ketiganya selalu dihitung, dan mode penilaian tugas hanya memilih mana yang
+ * berlaku. Mengubah mode sebuah tugas karena itu tidak pernah kehilangan data.
  */
 
 export interface StudentSummary {
   userId: string;
   attempts: number;
+  /** Nilai dari percobaan pertama yang sudah dinilai. */
+  firstScore: number | null;
   /** Nilai dari percobaan terakhir yang sudah dinilai. */
   latestScore: number | null;
   bestScore: number | null;
@@ -50,6 +53,7 @@ export function summarizeStudent(
     return {
       userId,
       attempts: 0,
+      firstScore: null,
       latestScore: null,
       bestScore: null,
       effectiveScore: null,
@@ -61,6 +65,7 @@ export function summarizeStudent(
   const scored = mine.filter(isScored);
   const last = mine[mine.length - 1];
 
+  const firstScore = scored.length > 0 ? (scored[0].score as number) : null;
   const latestScore =
     scored.length > 0 ? (scored[scored.length - 1].score as number) : null;
   const bestScore =
@@ -68,16 +73,32 @@ export function summarizeStudent(
       ? scored.reduce((max, s) => Math.max(max, s.score as number), 0)
       : null;
 
+  // Percobaan yang masih berjalan sengaja dilewati: "pertama" berarti nilai
+  // pertama yang benar-benar ada, bukan percobaan pertama yang belum selesai.
+  const effectiveScore = {
+    FIRST: firstScore,
+    BEST: bestScore,
+    LATEST: latestScore,
+  }[scoringMode];
+
   return {
     userId,
     attempts: mine.length,
+    firstScore,
     latestScore,
     bestScore,
-    effectiveScore: scoringMode === "BEST" ? bestScore : latestScore,
+    effectiveScore,
     lastSubmittedAt: last.submitted_at,
     status: last.status,
   };
 }
+
+/** Label mode penilaian untuk ditampilkan ke pengguna. */
+export const SCORING_MODE_LABEL: Record<ScoringMode, string> = {
+  FIRST: "nilai pertama",
+  BEST: "nilai terbaik",
+  LATEST: "nilai terakhir",
+};
 
 /** Ringkasan untuk sekumpulan mahasiswa (satu kelas pada satu tugas). */
 export function summarizeClass(

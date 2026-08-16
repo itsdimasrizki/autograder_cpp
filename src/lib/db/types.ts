@@ -7,7 +7,7 @@
 
 export type UserRole = "SUPER_ADMIN" | "ASSISTANT" | "STUDENT";
 export type MemberRole = "ASSISTANT" | "STUDENT";
-export type ScoringMode = "BEST" | "LATEST";
+export type ScoringMode = "BEST" | "LATEST" | "FIRST";
 export type SubmissionStatus = "QUEUED" | "RUNNING" | "PASS" | "FAIL" | "ERROR";
 export type TestStatus = "PASS" | "FAIL" | "SKIP";
 export type RepoStatus = "PENDING" | "READY" | "FAILED";

@@ -67,7 +67,7 @@ export async function createAssignmentAction(formData: FormData) {
         title: z.string().trim().min(3, "Judul minimal 3 karakter.").max(200),
         description: z.string().trim().max(5000).optional(),
         maxScore: z.coerce.number().int().min(1).max(1000),
-        scoringMode: z.enum(["BEST", "LATEST"]),
+        scoringMode: z.enum(["BEST", "LATEST", "FIRST"]),
         templateId: z.union([uuid, z.literal("")]).optional(),
       })
       .parse({
@@ -112,7 +112,7 @@ export async function updateAssignmentAction(formData: FormData) {
         title: z.string().trim().min(3).max(200),
         description: z.string().trim().max(5000).optional(),
         maxScore: z.coerce.number().int().min(1).max(1000),
-        scoringMode: z.enum(["BEST", "LATEST"]),
+        scoringMode: z.enum(["BEST", "LATEST", "FIRST"]),
         templateId: z.union([uuid, z.literal("")]).optional(),
       })
       .parse({

@@ -112,7 +112,8 @@ web_strukdat/
 │       ├── actions/                   server action + validasi zod
 │       └── views/                     penyusun data halaman
 ├── supabase/
-│   ├── migrations/0001_init.sql       skema + RLS
+│   ├── migrations/                    0001 skema+RLS, 0002 join link,
+│   │                                  0003 mode nilai pertama
 │   └── seed.sql                       1 course, 10 kelas, 9 pertemuan
 ├── template/                          ★ template repo praktikum (C++)
 │   ├── src/student.cpp                dikerjakan mahasiswa
@@ -123,7 +124,7 @@ web_strukdat/
 │   ├── scripts/job_summary.py         Job Summary dari result.json
 │   ├── scripts/write_error_result.sh  result.json saat compile error
 │   └── .github/workflows/test.yml     workflow penilaian
-├── tests/                             vitest (83 test)
+├── tests/                             vitest (155 test)
 └── DEPLOYMENT.md                      Supabase, GitHub App, Vercel
 ```
 
@@ -157,8 +158,13 @@ users ──┬── course_members ──┬── classes ── courses
 | `submissions` | **setiap** percobaan | unik `(student_repository_id, workflow_run_id, run_attempt)` ← kunci idempotensi |
 | `test_results` | rincian per test case | cascade dari submission |
 
-Enum: `user_role`, `member_role`, `scoring_mode`, `submission_status`
+Enum: `user_role`, `member_role`, `scoring_mode`
+(`BEST`/`LATEST`/`FIRST`), `submission_status`
 (`QUEUED`/`RUNNING`/`PASS`/`FAIL`/`ERROR`), `test_status`, `repo_status`.
+
+Mode penilaian hanya **memilih** nilai mana yang berlaku; nilai pertama,
+terbaik, dan terakhir ketiganya selalu dihitung dari riwayat submission. Karena
+itu mode sebuah tugas boleh dibolak-balik tanpa kehilangan data.
 
 RLS aktif pada seluruh tabel **tanpa policy**: hanya service role (server) yang
 dapat mengaksesnya.

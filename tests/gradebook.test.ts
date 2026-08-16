@@ -70,6 +70,45 @@ describe("ringkasan nilai mahasiswa", () => {
     expect(summarizeStudent("dimas", all, "LATEST").effectiveScore).toBe(100);
   });
 
+  it("mode FIRST memakai nilai percobaan pertama", () => {
+    expect(summarizeStudent("dimas", all, "FIRST").effectiveScore).toBe(40);
+    expect(summarizeStudent("budi", all, "FIRST").effectiveScore).toBe(80);
+  });
+
+  it("firstScore selalu dihitung, apa pun mode tugasnya", () => {
+    // Ketiga nilai selalu tersedia; mode hanya memilih mana yang berlaku.
+    const summary = summarizeStudent("dimas", all, "LATEST");
+    expect(summary.firstScore).toBe(40);
+    expect(summary.bestScore).toBe(100);
+    expect(summary.latestScore).toBe(100);
+  });
+
+  it("mode FIRST memakai percobaan yang sudah dinilai, bukan yang masih berjalan", () => {
+    // Percobaan pertama masih RUNNING saat percobaan kedua selesai: yang
+    // berlaku adalah nilai pertama yang benar-benar ada, bukan null.
+    const eka = [
+      submission("eka", null, "RUNNING", "2026-08-01T00:00:00.000Z"),
+      submission("eka", 55, "FAIL", "2026-08-02T00:00:00.000Z"),
+      submission("eka", 90, "PASS", "2026-08-03T00:00:00.000Z"),
+    ];
+    expect(summarizeStudent("eka", eka, "FIRST").effectiveScore).toBe(55);
+  });
+
+  it("mode FIRST tetap null bila belum ada percobaan yang dinilai", () => {
+    const fani = [submission("fani", null, "QUEUED", "2026-08-01T00:00:00.000Z")];
+    expect(summarizeStudent("fani", fani, "FIRST").effectiveScore).toBeNull();
+  });
+
+  it("mode FIRST mempertahankan nilai 0 sebagai nilai yang sah", () => {
+    // 0 adalah nilai, bukan "kosong". Praktikan yang percobaan pertamanya
+    // benar-benar 0 memang mendapat 0 — inilah konsekuensi mode FIRST.
+    const gani = [
+      submission("gani", 0, "FAIL", "2026-08-01T00:00:00.000Z"),
+      submission("gani", 100, "PASS", "2026-08-02T00:00:00.000Z"),
+    ];
+    expect(summarizeStudent("gani", gani, "FIRST").effectiveScore).toBe(0);
+  });
+
   it("mahasiswa tanpa pengumpulan berstatus NOT_SUBMITTED", () => {
     const summary = summarizeStudent("andi", all, "BEST");
     expect(summary).toMatchObject({
