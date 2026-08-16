@@ -60,7 +60,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const outcome = await syncFromWebhook({
+    const result = await syncFromWebhook({
       repositoryFullName: event.repositoryFullName,
       run: {
         runId: event.runId,
@@ -70,20 +70,24 @@ export async function POST(request: NextRequest) {
         conclusion: event.conclusion,
         htmlUrl: event.htmlUrl,
         updatedAt: event.updatedAt,
+        event: event.event,
+        triggeringActor: event.triggeringActor,
+        actorType: event.actorType,
       },
     });
 
-    // Repository yang tidak dikenal bukan error: bisa jadi repo lain di
-    // organisasi yang sama. Balas 200 supaya GitHub tidak mengirim ulang.
-    if (!outcome) {
-      return NextResponse.json({ ok: true, ignored: "repo_tidak_dikenal" });
+    // Event yang diabaikan bukan error: bisa jadi repo lain di organisasi yang
+    // sama, atau commit provisioning dari GitHub App. Balas 200 supaya GitHub
+    // tidak mengirim ulang.
+    if (!result.tersimpan) {
+      return NextResponse.json({ ok: true, ignored: result.alasan });
     }
 
     return NextResponse.json({
       ok: true,
-      created: outcome.created,
-      updated: outcome.updated,
-      submission_id: outcome.submission.id,
+      created: result.outcome.created,
+      updated: result.outcome.updated,
+      submission_id: result.outcome.submission.id,
     });
   } catch (error) {
     console.error("[webhook] gagal memproses workflow_run:", error);

@@ -1,7 +1,12 @@
 name: "Praktikum C++ — Auto Grade"
 
-# Setiap push ke repository mahasiswa dihitung sebagai satu percobaan
-# pengumpulan. Tidak ada tombol "submit" terpisah.
+# Setiap push mahasiswa dihitung sebagai satu percobaan pengumpulan. Tidak ada
+# tombol "submit" terpisah.
+#
+# workflow_dispatch dan pull_request tetap menjalankan penilaian, tetapi TIDAK
+# dicatat sebagai percobaan oleh aplikasi (lihat isStudentAttempt di
+# src/lib/grading/ingest.ts) — keduanya tidak mengubah kode, jadi "Run workflow"
+# bisa dipakai mahasiswa untuk mencoba tanpa menambah percobaan.
 on:
   push:
     branches: ["**"]

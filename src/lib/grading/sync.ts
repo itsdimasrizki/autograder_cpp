@@ -5,7 +5,12 @@ import { findRepositoryByFullName } from "@/lib/db/repositories";
 import { submissionStore } from "@/lib/db/submissions";
 import { fetchGradingResult, listWorkflowRuns } from "@/lib/github/actions";
 import { parseFullName } from "@/lib/github/naming";
-import { ingestGradingRun, type IngestOutcome, type RunInfo } from "@/lib/grading/ingest";
+import {
+  ingestGradingRun,
+  isStudentAttempt,
+  type IngestOutcome,
+  type RunInfo,
+} from "@/lib/grading/ingest";
 import { GradingResultError } from "@/lib/grading/result";
 import type { Assignment, StudentRepository } from "@/lib/db/types";
 
@@ -35,14 +40,24 @@ async function safeFetchResult(params: {
   }
 }
 
-/** Menyerap satu workflow run untuk repository yang sudah diketahui. */
+/**
+ * Menyerap satu workflow run untuk repository yang sudah diketahui.
+ *
+ * Mengembalikan null bila run tersebut bukan percobaan praktikan — yaitu
+ * commit "Initial commit" yang dibuat GitHub App saat repo disediakan.
+ * Run seperti itu tidak boleh meninggalkan baris submission apa pun:
+ * percobaan harus tetap 0 dan nilainya kosong sampai ada push sungguhan.
+ */
 export async function syncRun(params: {
   repository: StudentRepository;
   assignment: Assignment;
   run: RunInfo;
   /** Ambil artifact hanya bila run sudah selesai. */
   fetchResult: boolean;
-}): Promise<IngestOutcome> {
+}): Promise<IngestOutcome | null> {
+  // Disaring sebelum apa pun diunduh maupun ditulis.
+  if (!isStudentAttempt(params.run)) return null;
+
   const result = params.fetchResult
     ? await safeFetchResult({
         owner: params.repository.owner,
@@ -62,26 +77,43 @@ export async function syncRun(params: {
   });
 }
 
+/** Alasan sebuah event webhook tidak menghasilkan baris submission. */
+export type WebhookSkipReason =
+  | "repo_tidak_dikenal"
+  | "tugas_tidak_ditemukan"
+  | "bukan_percobaan_praktikan";
+
+export type WebhookSyncResult =
+  | { tersimpan: true; outcome: IngestOutcome }
+  | { tersimpan: false; alasan: WebhookSkipReason };
+
 /**
  * Jalur webhook: dari nama repository ke submission tersimpan.
- * Mengembalikan null bila repository bukan milik sistem ini.
+ *
+ * Alasan pengabaian dikembalikan apa adanya, bukan diringkas jadi null,
+ * supaya log webhook menyebut sebab yang sebenarnya saat ada yang perlu
+ * ditelusuri.
  */
 export async function syncFromWebhook(params: {
   repositoryFullName: string;
   run: RunInfo;
-}): Promise<IngestOutcome | null> {
+}): Promise<WebhookSyncResult> {
   const repository = await findRepositoryByFullName(params.repositoryFullName);
-  if (!repository) return null;
+  if (!repository) return { tersimpan: false, alasan: "repo_tidak_dikenal" };
 
   const assignment = await getAssignment(repository.assignment_id);
-  if (!assignment) return null;
+  if (!assignment) return { tersimpan: false, alasan: "tugas_tidak_ditemukan" };
 
-  return syncRun({
+  const outcome = await syncRun({
     repository,
     assignment,
     run: params.run,
     fetchResult: params.run.status === "completed",
   });
+
+  return outcome
+    ? { tersimpan: true, outcome }
+    : { tersimpan: false, alasan: "bukan_percobaan_praktikan" };
 }
 
 /**
@@ -94,7 +126,7 @@ export async function refreshRepository(params: {
   repository: StudentRepository;
   assignment: Assignment;
   limit?: number;
-}): Promise<{ synced: number; created: number }> {
+}): Promise<{ synced: number; created: number; diabaikan: number }> {
   const parsed = parseFullName(params.repository.full_name);
   if (!parsed) throw new Error("Nama repository tidak valid.");
 
@@ -105,7 +137,9 @@ export async function refreshRepository(params: {
   );
 
   let created = 0;
+  let diabaikan = 0;
   for (const run of runs) {
+    const actor = run.triggering_actor ?? run.actor ?? null;
     const outcome = await syncRun({
       repository: params.repository,
       assignment: params.assignment,
@@ -117,11 +151,15 @@ export async function refreshRepository(params: {
         conclusion: run.conclusion,
         htmlUrl: run.html_url,
         updatedAt: run.updated_at ?? run.created_at,
+        event: run.event ?? null,
+        triggeringActor: actor?.login ?? null,
+        actorType: actor?.type ?? null,
       },
       fetchResult: run.status === "completed",
     });
-    if (outcome.created) created++;
+    if (!outcome) diabaikan++;
+    else if (outcome.created) created++;
   }
 
-  return { synced: runs.length, created };
+  return { synced: runs.length, created, diabaikan };
 }

@@ -11,6 +11,11 @@ import {
 export const GRADING_ARTIFACT_NAME = "grading-result";
 export const GRADING_RESULT_FILE = "result.json";
 
+interface RunActor {
+  login: string;
+  type: string;
+}
+
 export interface WorkflowRun {
   id: number;
   run_attempt: number;
@@ -20,6 +25,10 @@ export interface WorkflowRun {
   html_url: string;
   created_at: string;
   updated_at: string;
+  /** Pemicu run; dipakai memisahkan push praktikan dari commit GitHub App. */
+  event?: string | null;
+  actor?: RunActor | null;
+  triggering_actor?: RunActor | null;
 }
 
 export async function getWorkflowRun(

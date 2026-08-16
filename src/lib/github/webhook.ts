@@ -35,6 +35,23 @@ export interface WorkflowRunEvent {
   conclusion: string | null;
   htmlUrl: string | null;
   updatedAt: string | null;
+  /** Event pemicu run: "push", "workflow_dispatch", "pull_request", ... */
+  event: string | null;
+  /** Login akun pemicu; dipakai untuk memisahkan push praktikan dari bot. */
+  triggeringActor: string | null;
+  actorType: string | null;
+}
+
+/** Membaca { login, type } dari objek actor GitHub. */
+function readActor(value: unknown): { login: string | null; type: string | null } {
+  if (typeof value !== "object" || value === null) {
+    return { login: null, type: null };
+  }
+  const actor = value as Record<string, unknown>;
+  return {
+    login: typeof actor.login === "string" ? actor.login : null,
+    type: typeof actor.type === "string" ? actor.type : null,
+  };
 }
 
 /**
@@ -64,6 +81,11 @@ export function parseWorkflowRunEvent(
     return null;
   }
 
+  // triggering_actor adalah yang benar-benar memulai run ini; actor bisa
+  // berbeda pada run yang dijalankan ulang, jadi ia hanya cadangan.
+  const triggering = readActor(run.triggering_actor);
+  const actor = triggering.login ? triggering : readActor(run.actor);
+
   return {
     action: typeof event.action === "string" ? event.action : "",
     repositoryFullName: fullName,
@@ -74,5 +96,8 @@ export function parseWorkflowRunEvent(
     conclusion: typeof run.conclusion === "string" ? run.conclusion : null,
     htmlUrl: typeof run.html_url === "string" ? run.html_url : null,
     updatedAt: typeof run.updated_at === "string" ? run.updated_at : null,
+    event: typeof run.event === "string" ? run.event : null,
+    triggeringActor: actor.login,
+    actorType: actor.type,
   };
 }

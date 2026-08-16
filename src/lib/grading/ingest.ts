@@ -19,6 +19,45 @@ export interface RunInfo {
   conclusion: string | null;
   htmlUrl: string | null;
   updatedAt: string | null;
+  /** Event pemicu: "push" | "workflow_dispatch" | "pull_request" | ... */
+  event?: string | null;
+  /** Login akun yang memicu run. Null bila GitHub tidak menyertakannya. */
+  triggeringActor?: string | null;
+  /** "User" | "Bot" | null. */
+  actorType?: string | null;
+}
+
+/**
+ * Apakah run ini percobaan pengumpulan, atau sekadar efek samping penyediaan
+ * repository?
+ *
+ * Membuat repo dari template menghasilkan sebuah "Initial commit" atas nama
+ * GitHub App. Commit itu adalah push, jadi workflow penilaian ikut jalan dan
+ * — sebelum ada saringan ini — tercatat sebagai percobaan #1 bernilai 0
+ * padahal praktikannya belum menyentuh apa pun.
+ *
+ * Dua syarat, keduanya harus terpenuhi:
+ *
+ *   1. Pemicunya bukan bot. Push perbaikan dari asisten sengaja tetap
+ *      dinilai; hanya akun mesin yang disaring.
+ *   2. Event-nya push. `workflow_dispatch` disaring karena menekan
+ *      "Run workflow" tidak mengubah kode sebaris pun — tanpa syarat ini
+ *      praktikan bisa mengunci nilainya sendiri di 0 pada mode FIRST hanya
+ *      dengan menjalankan workflow pada stub yang belum disentuh.
+ *      `pull_request` juga disaring: push ke branch-nya sudah menghasilkan
+ *      run tersendiri, jadi menghitungnya lagi berarti satu perubahan
+ *      dihitung dua kali.
+ *
+ * Keterangan yang tidak terbaca selalu diartikan "hitung saja". Gagal ke arah
+ * aman: mencatat percobaan yang meragukan jauh lebih ringan akibatnya daripada
+ * membuang pengumpulan praktikan tanpa jejak.
+ */
+export function isStudentAttempt(run: RunInfo): boolean {
+  if (run.actorType === "Bot") return false;
+  if (run.triggeringActor?.toLowerCase().endsWith("[bot]")) return false;
+
+  // Hanya menolak bila GitHub memang menyebut event lain.
+  return run.event == null || run.event === "push";
 }
 
 export interface SubmissionRecord {
