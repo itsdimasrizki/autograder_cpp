@@ -4,6 +4,7 @@ import { requireUser } from "@/lib/auth/current-user";
 import { loadAccessContext } from "@/lib/auth/authorize";
 import {
   canManageAssignment,
+  canManageClassAssignmentSettings,
   canViewAssignment,
   canViewClass,
   isAssistantOfCourse,
@@ -17,12 +18,24 @@ import {
 import { getCourse, listClasses, listClassMembers } from "@/lib/db/courses";
 import { listRepositoriesForAssignment } from "@/lib/db/repositories";
 import { listSubmissions } from "@/lib/db/submissions";
-import { SCORING_MODE_LABEL, summarizeClass } from "@/lib/grading/gradebook";
+import {
+  ATTEMPT_EXCLUSION_LABEL,
+  SCORING_MODE_LABEL,
+  summarizeClass,
+} from "@/lib/grading/gradebook";
+import { resolveAssignmentConfig } from "@/lib/grading/config";
+import {
+  countClassSettings,
+  getClassSettings,
+} from "@/lib/db/assignment-class-settings";
 import { buildStudentOverview } from "@/lib/views/student-overview";
+import { toWibInputValue } from "@/lib/time/wib";
 import {
   deleteAssignmentAction,
+  resetClassSettingsAction,
   togglePublishAction,
   updateAssignmentAction,
+  updateClassSettingsAction,
 } from "@/lib/actions/assignments";
 import { provisionClassAction } from "@/lib/actions/repositories";
 import { refreshClassAction, refreshStudentAction } from "@/lib/actions/grading";
@@ -43,18 +56,6 @@ import {
   formatDate,
   inputClass,
 } from "@/components/ui";
-
-/** <input type="datetime-local"> butuh "YYYY-MM-DDTHH:mm" waktu lokal. */
-function toLocalInputValue(iso: string | null): string {
-  if (!iso) return "";
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "";
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return (
-    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
-    `T${pad(date.getHours())}:${pad(date.getMinutes())}`
-  );
-}
 
 export const dynamic = "force-dynamic";
 
@@ -97,11 +98,12 @@ export default async function AssignmentPage({
       subtitle={
         <>
           Pertemuan {assignment.meeting_number} · {course?.name ?? ""} · Nilai
-          maksimal {assignment.max_score} · Mode{" "}
+          maksimal {assignment.max_score} · Nilai dasar: mode{" "}
           {SCORING_MODE_LABEL[assignment.scoring_mode]}
           {assignment.deadline
-            ? ` · Tenggat ${formatDate(assignment.deadline)}`
+            ? ` · tenggat ${formatDate(assignment.deadline)}`
             : ""}
+          {" · tiap kelas dapat berbeda"}
         </>
       }
       action={
@@ -180,7 +182,7 @@ export default async function AssignmentPage({
           </Card>
 
           <Card title="Riwayat Percobaan">
-            {!view || view.history.length === 0 ? (
+            {!view || view.attempts.length === 0 ? (
               <Empty>
                 Belum ada percobaan. Dorong (push) kode ke repository Anda untuk
                 memulai penilaian otomatis.
@@ -189,25 +191,39 @@ export default async function AssignmentPage({
               <Table
                 head={["#", "Waktu", "Commit", "Status", "Nilai", "Test", ""]}
               >
-                {view.history.map((submission, index) => (
-                  <tr key={submission.id}>
+                {view.attempts.map((attempt, index) => (
+                  <tr key={attempt.submission.id}>
                     <Td className="text-slate-500">{index + 1}</Td>
-                    <Td>{formatDate(submission.submitted_at)}</Td>
+                    <Td>{formatDate(attempt.submission.submitted_at)}</Td>
                     <Td className="font-mono text-xs">
-                      {submission.commit_sha.slice(0, 7)}
+                      {attempt.submission.commit_sha.slice(0, 7)}
                     </Td>
                     <Td>
-                      <Badge value={submission.status} />
+                      <Badge value={attempt.submission.status} />
                     </Td>
-                    <Td className="font-medium">{submission.score ?? "—"}</Td>
-                    <Td>
-                      {submission.passed_tests ?? "—"} /{" "}
-                      {submission.total_tests ?? "—"}
+                    <Td
+                      className={
+                        attempt.eligible
+                          ? "font-medium"
+                          : "text-slate-400 line-through"
+                      }
+                    >
+                      {attempt.submission.score ?? "—"}
+                      {attempt.exclusion &&
+                        attempt.exclusion !== "BELUM_DINILAI" && (
+                          <span className="ml-1 text-xs text-slate-500 no-underline">
+                            {ATTEMPT_EXCLUSION_LABEL[attempt.exclusion]}
+                          </span>
+                        )}
                     </Td>
                     <Td>
-                      {submission.html_url && (
+                      {attempt.submission.passed_tests ?? "—"} /{" "}
+                      {attempt.submission.total_tests ?? "—"}
+                    </Td>
+                    <Td>
+                      {attempt.submission.html_url && (
                         <a
-                          href={submission.html_url}
+                          href={attempt.submission.html_url}
                           target="_blank"
                           rel="noreferrer"
                           className="text-sm text-slate-700 underline"
@@ -243,16 +259,23 @@ export default async function AssignmentPage({
     : [];
   const userIds = members.map((member) => member.user.id);
 
-  const [submissions, repositories] = await Promise.all([
-    listSubmissions({ assignmentId: assignment.id, userIds }),
-    listRepositoriesForAssignment(assignment.id),
-  ]);
+  const [submissions, repositories, override, jumlahKelasDisetel] =
+    await Promise.all([
+      listSubmissions({ assignmentId: assignment.id, userIds }),
+      listRepositoriesForAssignment(assignment.id),
+      selectedClass
+        ? getClassSettings(assignment.id, selectedClass.id)
+        : Promise.resolve(null),
+      canManage ? countClassSettings(assignment.id) : Promise.resolve(0),
+    ]);
 
-  const summaries = summarizeClass(
-    userIds,
-    submissions,
-    assignment.scoring_mode,
-  );
+  // Konfigurasi yang benar-benar berlaku untuk kelas yang sedang dilihat.
+  const config = resolveAssignmentConfig(assignment, override);
+  const canManageThisClass =
+    selectedClass !== undefined &&
+    canManageClassAssignmentSettings(ctx, selectedClass.id);
+
+  const summaries = summarizeClass(userIds, submissions, config);
 
   return (
     <Shell user={user}>
@@ -383,7 +406,14 @@ export default async function AssignmentPage({
                     <Td className="font-medium">
                       {summary.effectiveScore ?? "—"}
                     </Td>
-                    <Td>{summary.attempts}</Td>
+                    <Td>
+                      {summary.attempts}
+                      {summary.attempts !== summary.countedAttempts && (
+                        <span className="ml-1 text-xs text-slate-500">
+                          ({summary.countedAttempts} dihitung)
+                        </span>
+                      )}
+                    </Td>
                     <Td>{formatDate(summary.lastSubmittedAt)}</Td>
                   </tr>
                 );
@@ -395,6 +425,100 @@ export default async function AssignmentPage({
         <Card>
           <Empty>Tidak ada kelas yang dapat Anda akses pada tugas ini.</Empty>
         </Card>
+      )}
+
+      {selectedClass && canManageThisClass && (
+        <div className="mt-6">
+          <Card
+            title={`Setelan Kelas — ${selectedClass.name}`}
+            action={
+              <span className="text-xs text-slate-600">
+                {config.source === "KELAS"
+                  ? "Disetel untuk kelas ini"
+                  : "Mengikuti nilai dasar"}
+              </span>
+            }
+          >
+            <p className="mb-3 text-sm text-slate-600">
+              Tugas <strong>{assignment.title}</strong> · nilai maksimal{" "}
+              {assignment.max_score} · template{" "}
+              {template ? `${template.owner}/${template.repo}` : "belum ada"}.
+              Ketiganya sama untuk seluruh kelas dan hanya dapat diubah admin.
+            </p>
+
+            <form
+              action={updateClassSettingsAction}
+              className="grid gap-3 sm:grid-cols-2"
+            >
+              <input type="hidden" name="assignmentId" value={assignment.id} />
+              <input type="hidden" name="classId" value={selectedClass.id} />
+
+              <Field
+                label="Tenggat (opsional, WIB)"
+                hint="Kosongkan untuk kelas tanpa tenggat. Percobaan setelah tenggat tetap tersimpan dan tetap terlihat, tetapi tidak masuk hitungan nilai."
+              >
+                <input
+                  name="deadline"
+                  type="datetime-local"
+                  defaultValue={toWibInputValue(config.deadline)}
+                  className={inputClass}
+                />
+              </Field>
+
+              <Field
+                label="Percobaan maksimal (opsional)"
+                hint="Kosongkan untuk tanpa batas. Percobaan yang gagal kompilasi atau masih berjalan tidak memakan jatah."
+              >
+                <input
+                  name="maxAttempts"
+                  type="number"
+                  min={1}
+                  defaultValue={config.maxAttempts ?? ""}
+                  className={inputClass}
+                  placeholder="tanpa batas"
+                />
+              </Field>
+
+              <div className="sm:col-span-2">
+                <Field
+                  label="Mode penilaian"
+                  hint="Boleh diubah kapan saja: nilai pertama, terbaik, dan terakhir semuanya tetap tersimpan, jadi berpindah mode tidak menghilangkan riwayat."
+                >
+                  <select
+                    name="scoringMode"
+                    defaultValue={config.scoringMode}
+                    className={inputClass}
+                  >
+                    <option value="BEST">Nilai terbaik</option>
+                    <option value="LATEST">Nilai terakhir</option>
+                    <option value="FIRST">Nilai pertama</option>
+                  </select>
+                </Field>
+              </div>
+
+              <div className="sm:col-span-2">
+                <Button type="submit">Simpan setelan kelas</Button>
+              </div>
+            </form>
+
+            {config.source === "KELAS" && (
+              <form action={resetClassSettingsAction} className="mt-3">
+                <input
+                  type="hidden"
+                  name="assignmentId"
+                  value={assignment.id}
+                />
+                <input type="hidden" name="classId" value={selectedClass.id} />
+                <ConfirmButton
+                  variant="secondary"
+                  message={`Kembalikan ${selectedClass.name} ke nilai dasar yang ditetapkan admin? Riwayat nilai tidak terhapus.`}
+                >
+                  Ikuti nilai dasar lagi
+                </ConfirmButton>
+              </form>
+            )}
+          </Card>
+        </div>
       )}
 
       {canManage && (
@@ -462,11 +586,11 @@ export default async function AssignmentPage({
                 />
               </Field>
 
-              <Field label="Tenggat (opsional)">
+              <Field label="Tenggat (opsional, WIB)">
                 <input
                   name="deadline"
                   type="datetime-local"
-                  defaultValue={toLocalInputValue(assignment.deadline)}
+                  defaultValue={toWibInputValue(assignment.deadline)}
                   className={inputClass}
                 />
               </Field>
@@ -497,8 +621,26 @@ export default async function AssignmentPage({
                 </select>
               </Field>
 
-              <div className="sm:col-span-2">
+              <p className="sm:col-span-2 text-xs text-slate-600">
+                &quot;Simpan perubahan&quot; tidak menyentuh kelas yang sudah
+                disetel asistennya
+                {jumlahKelasDisetel > 0 ? ` (${jumlahKelasDisetel} kelas)` : ""}.
+              </p>
+
+              <div className="sm:col-span-2 flex flex-wrap items-center gap-2">
                 <Button type="submit">Simpan perubahan</Button>
+                <ConfirmButton
+                  variant="secondary"
+                  name="applyToAllClasses"
+                  value="1"
+                  message={
+                    jumlahKelasDisetel > 0
+                      ? `Setelan pada ${jumlahKelasDisetel} kelas akan dihapus dan semua kelas kembali mengikuti nilai dasar. Riwayat nilai tidak terhapus. Lanjutkan?`
+                      : "Belum ada kelas yang disetel terpisah, jadi tidak ada yang hilang. Lanjutkan?"
+                  }
+                >
+                  Simpan dan terapkan ke semua kelas
+                </ConfirmButton>
               </div>
             </form>
           </Card>

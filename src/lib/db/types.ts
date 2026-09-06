@@ -81,6 +81,26 @@ export type Assignment = {
   updated_at: string;
 }
 
+/**
+ * Setelan sebuah tugas untuk SATU kelas.
+ *
+ * Baris ini ada berarti kelas tersebut sudah disesuaikan asistennya; tidak ada
+ * baris berarti kelas mengikuti nilai dasar di tabel assignments. Karena itu
+ * `deadline` dan `max_attempts` yang bernilai null di sini berarti benar-benar
+ * "tanpa tenggat" / "tanpa batas", bukan "ikut nilai dasar".
+ */
+export type AssignmentClassSettings = {
+  assignment_id: string;
+  class_id: string;
+  course_id: string;
+  deadline: string | null;
+  max_attempts: number | null;
+  scoring_mode: ScoringMode;
+  updated_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export type StudentRepository = {
   id: string;
   assignment_id: string;
@@ -170,6 +190,7 @@ export type Database = {
       course_members: Table<CourseMember>;
       assignment_templates: Table<AssignmentTemplate>;
       assignments: Table<Assignment>;
+      assignment_class_settings: Table<AssignmentClassSettings>;
       student_repositories: Table<StudentRepository>;
       submissions: Table<Submission>;
       test_results: Table<TestResult>;

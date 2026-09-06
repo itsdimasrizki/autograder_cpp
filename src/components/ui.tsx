@@ -168,16 +168,10 @@ export function ErrorNote({ children }: { children: ReactNode }) {
   );
 }
 
-/** Format tanggal ringkas untuk tabel. */
-export function formatDate(value: string | null | undefined): string {
-  if (!value) return "—";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "—";
-  return date.toLocaleString("id-ID", {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
+/**
+ * Format tanggal ringkas untuk tabel — selalu WIB.
+ *
+ * Satu-satunya implementasi ada di @/lib/time/wib; di sini hanya diekspor
+ * ulang supaya belasan pemanggil yang sudah ada tidak perlu diubah.
+ */
+export { formatWib as formatDate } from "@/lib/time/wib";

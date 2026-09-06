@@ -191,6 +191,24 @@ export function canManageAssignment(ctx: AccessContext): boolean {
 }
 
 /**
+ * Menyetel tenggat, percobaan maksimal, dan mode penilaian untuk SATU kelas.
+ *
+ * Sengaja memakai isAssistantOfClass, bukan isAssistantOfCourse: inilah yang
+ * membuat asisten Kelas B tidak dapat menyentuh Kelas A, sejalan dengan
+ * canManageClassRoster. Satu orang yang memegang beberapa kelas otomatis boleh
+ * menyetel semuanya, karena course_members memang membolehkan beberapa baris.
+ *
+ * Nilai dasar tugas — judul, template, nilai maksimal, terbit/tarik — tetap
+ * hanya milik SUPER_ADMIN lewat canManageAssignment.
+ */
+export function canManageClassAssignmentSettings(
+  ctx: AccessContext,
+  classId: string,
+): boolean {
+  return isSuperAdmin(ctx) || isAssistantOfClass(ctx, classId);
+}
+
+/**
  * Tugas yang belum diterbitkan hanya terlihat oleh SUPER_ADMIN dan asisten
  * pada course tersebut. Mahasiswa hanya melihat tugas yang sudah diterbitkan
  * pada course yang diikutinya.

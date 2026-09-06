@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   attemptHistory,
+  evaluateAttempts,
   formatScoreTrail,
   summarizeClass,
   summarizeStudent,
 } from "@/lib/grading/gradebook";
-import type { Submission, SubmissionStatus } from "@/lib/db/types";
+import type { ResolvedAssignmentConfig } from "@/lib/grading/config";
+import type { ScoringMode, Submission, SubmissionStatus } from "@/lib/db/types";
 
 let counter = 0;
 
@@ -36,6 +38,11 @@ function submission(
   };
 }
 
+/** Konfigurasi tanpa tenggat dan tanpa kuota — perilaku sebelum fitur ini. */
+function config(scoringMode: ScoringMode): ResolvedAssignmentConfig {
+  return { deadline: null, maxAttempts: null, scoringMode, source: "DASAR" };
+}
+
 /** Riwayat khas: 40 -> 70 -> 100. */
 const dimas = [
   submission("dimas", 40, "FAIL", "2026-08-01T00:00:00.000Z"),
@@ -53,7 +60,7 @@ const all = [...dimas, ...budi];
 
 describe("ringkasan nilai mahasiswa", () => {
   it("menghitung nilai terakhir, terbaik, dan jumlah percobaan", () => {
-    const summary = summarizeStudent("dimas", all, "BEST");
+    const summary = summarizeStudent("dimas", all, config("BEST"));
     expect(summary.attempts).toBe(3);
     expect(summary.latestScore).toBe(100);
     expect(summary.bestScore).toBe(100);
@@ -62,22 +69,22 @@ describe("ringkasan nilai mahasiswa", () => {
   });
 
   it("mode BEST memakai nilai tertinggi walau percobaan terakhir lebih rendah", () => {
-    expect(summarizeStudent("budi", all, "BEST").effectiveScore).toBe(80);
+    expect(summarizeStudent("budi", all, config("BEST")).effectiveScore).toBe(80);
   });
 
   it("mode LATEST memakai nilai percobaan terakhir", () => {
-    expect(summarizeStudent("budi", all, "LATEST").effectiveScore).toBe(60);
-    expect(summarizeStudent("dimas", all, "LATEST").effectiveScore).toBe(100);
+    expect(summarizeStudent("budi", all, config("LATEST")).effectiveScore).toBe(60);
+    expect(summarizeStudent("dimas", all, config("LATEST")).effectiveScore).toBe(100);
   });
 
   it("mode FIRST memakai nilai percobaan pertama", () => {
-    expect(summarizeStudent("dimas", all, "FIRST").effectiveScore).toBe(40);
-    expect(summarizeStudent("budi", all, "FIRST").effectiveScore).toBe(80);
+    expect(summarizeStudent("dimas", all, config("FIRST")).effectiveScore).toBe(40);
+    expect(summarizeStudent("budi", all, config("FIRST")).effectiveScore).toBe(80);
   });
 
   it("firstScore selalu dihitung, apa pun mode tugasnya", () => {
     // Ketiga nilai selalu tersedia; mode hanya memilih mana yang berlaku.
-    const summary = summarizeStudent("dimas", all, "LATEST");
+    const summary = summarizeStudent("dimas", all, config("LATEST"));
     expect(summary.firstScore).toBe(40);
     expect(summary.bestScore).toBe(100);
     expect(summary.latestScore).toBe(100);
@@ -91,12 +98,12 @@ describe("ringkasan nilai mahasiswa", () => {
       submission("eka", 55, "FAIL", "2026-08-02T00:00:00.000Z"),
       submission("eka", 90, "PASS", "2026-08-03T00:00:00.000Z"),
     ];
-    expect(summarizeStudent("eka", eka, "FIRST").effectiveScore).toBe(55);
+    expect(summarizeStudent("eka", eka, config("FIRST")).effectiveScore).toBe(55);
   });
 
   it("mode FIRST tetap null bila belum ada percobaan yang dinilai", () => {
     const fani = [submission("fani", null, "QUEUED", "2026-08-01T00:00:00.000Z")];
-    expect(summarizeStudent("fani", fani, "FIRST").effectiveScore).toBeNull();
+    expect(summarizeStudent("fani", fani, config("FIRST")).effectiveScore).toBeNull();
   });
 
   it("mode FIRST mempertahankan nilai 0 sebagai nilai yang sah", () => {
@@ -106,13 +113,14 @@ describe("ringkasan nilai mahasiswa", () => {
       submission("gani", 0, "FAIL", "2026-08-01T00:00:00.000Z"),
       submission("gani", 100, "PASS", "2026-08-02T00:00:00.000Z"),
     ];
-    expect(summarizeStudent("gani", gani, "FIRST").effectiveScore).toBe(0);
+    expect(summarizeStudent("gani", gani, config("FIRST")).effectiveScore).toBe(0);
   });
 
   it("mahasiswa tanpa pengumpulan berstatus NOT_SUBMITTED", () => {
-    const summary = summarizeStudent("andi", all, "BEST");
+    const summary = summarizeStudent("andi", all, config("BEST"));
     expect(summary).toMatchObject({
       attempts: 0,
+      countedAttempts: 0,
       latestScore: null,
       bestScore: null,
       effectiveScore: null,
@@ -123,8 +131,8 @@ describe("ringkasan nilai mahasiswa", () => {
 
   it("hanya menghitung data mahasiswa yang bersangkutan", () => {
     // Data Budi tidak boleh mempengaruhi ringkasan Dimas.
-    expect(summarizeStudent("dimas", all, "BEST").attempts).toBe(3);
-    expect(summarizeStudent("budi", all, "BEST").attempts).toBe(2);
+    expect(summarizeStudent("dimas", all, config("BEST")).attempts).toBe(3);
+    expect(summarizeStudent("budi", all, config("BEST")).attempts).toBe(2);
   });
 
   it("percobaan yang masih berjalan tidak dihitung sebagai nilai", () => {
@@ -132,7 +140,7 @@ describe("ringkasan nilai mahasiswa", () => {
       submission("citra", 90, "PASS", "2026-08-01T00:00:00.000Z"),
       submission("citra", null, "RUNNING", "2026-08-05T00:00:00.000Z"),
     ];
-    const summary = summarizeStudent("citra", running, "LATEST");
+    const summary = summarizeStudent("citra", running, config("LATEST"));
     expect(summary.attempts).toBe(2);
     expect(summary.latestScore).toBe(90);
     expect(summary.status).toBe("RUNNING");
@@ -143,7 +151,7 @@ describe("ringkasan nilai mahasiswa", () => {
       submission("eka", 0, "ERROR", "2026-08-01T00:00:00.000Z"),
       submission("eka", 55, "FAIL", "2026-08-02T00:00:00.000Z"),
     ];
-    const summary = summarizeStudent("eka", error, "BEST");
+    const summary = summarizeStudent("eka", error, config("BEST"));
     expect(summary.attempts).toBe(2);
     expect(summary.bestScore).toBe(55);
     expect(summary.latestScore).toBe(55);
@@ -158,14 +166,28 @@ describe("riwayat percobaan", () => {
   });
 
   it("ditampilkan sebagai 40 → 70 → 100", () => {
-    expect(formatScoreTrail(attemptHistory("dimas", all))).toBe("40 → 70 → 100");
+    const tanpaBatas = { deadline: null, maxAttempts: null };
+    expect(
+      formatScoreTrail(evaluateAttempts(attemptHistory("dimas", all), tanpaBatas)),
+    ).toBe("40 → 70 → 100");
     expect(formatScoreTrail([])).toBe("—");
+  });
+
+  it("percobaan yang tidak dihitung ditampilkan dalam kurung", () => {
+    expect(
+      formatScoreTrail(
+        evaluateAttempts(attemptHistory("dimas", all), {
+          deadline: null,
+          maxAttempts: 1,
+        }),
+      ),
+    ).toBe("40 → (70) → (100)");
   });
 });
 
 describe("gradebook satu kelas", () => {
   it("mengembalikan satu baris untuk setiap mahasiswa, termasuk yang belum mengumpulkan", () => {
-    const rows = summarizeClass(["dimas", "budi", "andi"], all, "BEST");
+    const rows = summarizeClass(["dimas", "budi", "andi"], all, config("BEST"));
 
     expect(rows).toHaveLength(3);
     expect(rows.map((row) => row.effectiveScore)).toEqual([100, 80, null]);

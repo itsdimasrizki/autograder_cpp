@@ -7,6 +7,7 @@ import {
   canDeleteUser,
   canListAllUsers,
   canManageAssignment,
+  canManageClassAssignmentSettings,
   canManageClassRoster,
   canManageCourse,
   canManageJoinLink,
@@ -333,5 +334,53 @@ describe("akses tanpa hak", () => {
   it("assert melempar AuthorizationError saat ditolak", () => {
     expect(() => assert(canManageCourse(studentA))).toThrow(AuthorizationError);
     expect(() => assert(canManageCourse(admin))).not.toThrow();
+  });
+});
+
+describe("setelan tugas per kelas", () => {
+  it("SUPER_ADMIN boleh menyetel kelas mana pun", () => {
+    expect(canManageClassAssignmentSettings(admin, CLASS_A)).toBe(true);
+    expect(canManageClassAssignmentSettings(admin, CLASS_B)).toBe(true);
+  });
+
+  it("asisten hanya boleh menyetel kelas yang diasuhnya", () => {
+    expect(canManageClassAssignmentSettings(assistantA, CLASS_A)).toBe(true);
+    expect(canManageClassAssignmentSettings(assistantA, CLASS_B)).toBe(false);
+    expect(canManageClassAssignmentSettings(assistantB, CLASS_B)).toBe(true);
+    expect(canManageClassAssignmentSettings(assistantB, CLASS_A)).toBe(false);
+  });
+
+  it("satu asisten yang memegang beberapa kelas boleh menyetel semuanya", () => {
+    const asistenDuaKelas: AccessContext = {
+      user: { id: "user-asisten-x", role: "ASSISTANT" },
+      memberships: [
+        membership(CLASS_A, "ASSISTANT"),
+        membership("class-c", "ASSISTANT"),
+      ],
+    };
+    expect(canManageClassAssignmentSettings(asistenDuaKelas, CLASS_A)).toBe(true);
+    expect(canManageClassAssignmentSettings(asistenDuaKelas, "class-c")).toBe(true);
+    expect(canManageClassAssignmentSettings(asistenDuaKelas, CLASS_B)).toBe(false);
+  });
+
+  it("asisten tanpa kelas tidak boleh menyetel apa pun", () => {
+    expect(canManageClassAssignmentSettings(assistantTanpaKelas, CLASS_A)).toBe(
+      false,
+    );
+  });
+
+  it("mahasiswa tidak pernah boleh menyetel kelasnya sendiri", () => {
+    const mahasiswa: AccessContext = {
+      user: { id: "user-mahasiswa", role: "STUDENT" },
+      memberships: [membership(CLASS_A, "STUDENT")],
+    };
+    expect(canManageClassAssignmentSettings(mahasiswa, CLASS_A)).toBe(false);
+  });
+
+  it("nilai dasar tugas tetap hanya milik SUPER_ADMIN", () => {
+    // Asisten mendapat setelan per kelas, bukan kendali atas judul, template,
+    // nilai maksimal, maupun terbit/tarik.
+    expect(canManageAssignment(assistantA)).toBe(false);
+    expect(canManageAssignment(admin)).toBe(true);
   });
 });

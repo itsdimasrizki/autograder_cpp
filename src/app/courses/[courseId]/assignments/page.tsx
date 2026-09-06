@@ -2,9 +2,24 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/auth/current-user";
 import { loadAccessContext } from "@/lib/auth/authorize";
-import { canManageAssignment, canViewAssignment, canViewCourse } from "@/lib/auth/policy";
+import {
+  canManageAssignment,
+  canViewAssignment,
+  canViewCourse,
+  isAssistantOfCourse,
+  isSuperAdmin,
+} from "@/lib/auth/policy";
 import { getCourse } from "@/lib/db/courses";
 import { listAssignments, listTemplates } from "@/lib/db/assignments";
+import {
+  listClassSettingsByAssignments,
+  listClassSettingsForAssignments,
+} from "@/lib/db/assignment-class-settings";
+import { listStudentClassMemberships } from "@/lib/db/courses";
+import {
+  pickStudentClassId,
+  resolveAssignmentConfig,
+} from "@/lib/grading/config";
 import { SCORING_MODE_LABEL } from "@/lib/grading/gradebook";
 import {
   createAssignmentAction,
@@ -67,6 +82,22 @@ export default async function AssignmentsPage({
     (assignment) => assignment.archived_at !== null,
   );
 
+  // Kolom "Tenggat" harus jujur. Bagi mahasiswa ia menampilkan tenggat KELASNYA;
+  // bagi staf ia menampilkan nilai dasar plus penanda bila ada kelas yang sudah
+  // disetel berbeda, supaya satu angka tidak tampil seolah berlaku untuk semua.
+  const isStaff = isSuperAdmin(ctx) || isAssistantOfCourse(ctx, course.id);
+  const assignmentIds = assignments.map((assignment) => assignment.id);
+
+  const studentClassId = isStaff
+    ? null
+    : pickStudentClassId(await listStudentClassMemberships(user.id), course.id);
+
+  const classSettings = isStaff
+    ? await listClassSettingsByAssignments(assignmentIds)
+    : studentClassId
+      ? await listClassSettingsForAssignments(assignmentIds, [studentClassId])
+      : [];
+
   return (
     <Shell user={user}>
       <PageHeader
@@ -101,7 +132,26 @@ export default async function AssignmentsPage({
                       {assignment.title}
                     </Link>
                   </Td>
-                  <Td>{formatDate(assignment.deadline)}</Td>
+                  <Td>
+                    {formatDate(
+                      isStaff
+                        ? assignment.deadline
+                        : resolveAssignmentConfig(
+                            assignment,
+                            classSettings.find(
+                              (row) => row.assignment_id === assignment.id,
+                            ),
+                          ).deadline,
+                    )}
+                    {isStaff &&
+                      classSettings.some(
+                        (row) => row.assignment_id === assignment.id,
+                      ) && (
+                        <span className="ml-1 text-xs text-slate-500">
+                          · berbeda per kelas
+                        </span>
+                      )}
+                  </Td>
                   <Td>{SCORING_MODE_LABEL[assignment.scoring_mode]}</Td>
                   <Td>
                     <Badge
@@ -237,7 +287,7 @@ export default async function AssignmentsPage({
                 />
               </Field>
 
-              <Field label="Tenggat (opsional)">
+              <Field label="Tenggat (opsional, WIB)">
                 <input
                   name="deadline"
                   type="datetime-local"

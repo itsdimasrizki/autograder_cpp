@@ -6,7 +6,7 @@ import { Badge, formatDate } from "@/components/ui";
 export function AssignmentCards({ items }: { items: StudentAssignmentView[] }) {
   return (
     <ul className="grid gap-3 sm:grid-cols-2">
-      {items.map(({ assignment, repository, summary, trail }) => (
+      {items.map(({ assignment, repository, summary, trail, config }) => (
         <li
           key={assignment.id}
           className="rounded border border-slate-200 p-3"
@@ -39,11 +39,16 @@ export function AssignmentCards({ items }: { items: StudentAssignmentView[] }) {
             <dt className="text-slate-500">Percobaan</dt>
             <dd className="text-right">
               {summary.attempts}
-              {assignment.max_attempts ? ` / ${assignment.max_attempts}` : ""}
+              {config.maxAttempts ? ` / ${config.maxAttempts}` : ""}
+              {summary.attempts !== summary.countedAttempts && (
+                <span className="ml-1 text-xs text-slate-500">
+                  ({summary.countedAttempts} dihitung)
+                </span>
+              )}
             </dd>
 
             <dt className="text-slate-500">Tenggat</dt>
-            <dd className="text-right">{formatDate(assignment.deadline)}</dd>
+            <dd className="text-right">{formatDate(config.deadline)}</dd>
           </dl>
 
           <p className="mt-2 text-sm text-slate-600">

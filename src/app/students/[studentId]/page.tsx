@@ -5,6 +5,7 @@ import { canViewStudentData } from "@/lib/auth/policy";
 import { findUserById } from "@/lib/db/users";
 import { listTestResults } from "@/lib/db/submissions";
 import { buildStudentOverview } from "@/lib/views/student-overview";
+import { ATTEMPT_EXCLUSION_LABEL } from "@/lib/grading/gradebook";
 import { provisionOneAction } from "@/lib/actions/repositories";
 import { refreshStudentAction } from "@/lib/actions/grading";
 import { Shell } from "@/components/shell";
@@ -59,7 +60,8 @@ export default async function StudentPage({
     overview.find((item) => item.assignment.id === assignmentId) ?? overview[0];
 
   // Rincian test dari percobaan terakhir yang punya hasil.
-  const lastScored = selected?.history
+  const lastScored = selected?.attempts
+    .map((attempt) => attempt.submission)
     .filter((submission) => submission.total_tests !== null)
     .at(-1);
   const testResults = lastScored ? await listTestResults(lastScored.id) : [];
@@ -111,7 +113,14 @@ export default async function StudentPage({
                   </Td>
                   <Td>{item.summary.bestScore ?? "—"}</Td>
                   <Td>{item.summary.latestScore ?? "—"}</Td>
-                  <Td>{item.summary.attempts}</Td>
+                  <Td>
+                    {item.summary.attempts}
+                    {item.summary.attempts !== item.summary.countedAttempts && (
+                      <span className="ml-1 text-xs text-slate-500">
+                        ({item.summary.countedAttempts} dihitung)
+                      </span>
+                    )}
+                  </Td>
                   <Td className="font-mono text-xs">{item.trail}</Td>
                 </tr>
               ))}
@@ -162,31 +171,45 @@ export default async function StudentPage({
               </div>
             )}
 
-            {selected.history.length === 0 ? (
+            {selected.attempts.length === 0 ? (
               <Empty>Belum ada percobaan pengumpulan.</Empty>
             ) : (
               <Table
                 head={["#", "Waktu", "Commit", "Status", "Nilai", "Test", ""]}
               >
-                {selected.history.map((submission, index) => (
-                  <tr key={submission.id}>
+                {selected.attempts.map((attempt, index) => (
+                  <tr key={attempt.submission.id}>
                     <Td className="text-slate-500">{index + 1}</Td>
-                    <Td>{formatDate(submission.submitted_at)}</Td>
+                    <Td>{formatDate(attempt.submission.submitted_at)}</Td>
                     <Td className="font-mono text-xs">
-                      {submission.commit_sha.slice(0, 7)}
+                      {attempt.submission.commit_sha.slice(0, 7)}
                     </Td>
                     <Td>
-                      <Badge value={submission.status} />
+                      <Badge value={attempt.submission.status} />
                     </Td>
-                    <Td className="font-medium">{submission.score ?? "—"}</Td>
-                    <Td>
-                      {submission.passed_tests ?? "—"} /{" "}
-                      {submission.total_tests ?? "—"}
+                    <Td
+                      className={
+                        attempt.eligible
+                          ? "font-medium"
+                          : "text-slate-400 line-through"
+                      }
+                    >
+                      {attempt.submission.score ?? "—"}
+                      {attempt.exclusion &&
+                        attempt.exclusion !== "BELUM_DINILAI" && (
+                          <span className="ml-1 text-xs text-slate-500 no-underline">
+                            {ATTEMPT_EXCLUSION_LABEL[attempt.exclusion]}
+                          </span>
+                        )}
                     </Td>
                     <Td>
-                      {submission.html_url && (
+                      {attempt.submission.passed_tests ?? "—"} /{" "}
+                      {attempt.submission.total_tests ?? "—"}
+                    </Td>
+                    <Td>
+                      {attempt.submission.html_url && (
                         <a
-                          href={submission.html_url}
+                          href={attempt.submission.html_url}
                           target="_blank"
                           rel="noreferrer"
                           className="text-sm underline"
