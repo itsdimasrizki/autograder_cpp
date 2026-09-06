@@ -110,6 +110,11 @@ export default async function StudentPage({
                   </Td>
                   <Td className="font-medium">
                     {item.summary.effectiveScore ?? "—"}
+                    {item.summary.effectiveLate && (
+                      <span className="ml-1 text-xs font-normal text-amber-700">
+                        terlambat
+                      </span>
+                    )}
                   </Td>
                   <Td>{item.summary.bestScore ?? "—"}</Td>
                   <Td>{item.summary.latestScore ?? "—"}</Td>
@@ -201,6 +206,11 @@ export default async function StudentPage({
                             {ATTEMPT_EXCLUSION_LABEL[attempt.exclusion]}
                           </span>
                         )}
+                      {attempt.late && (
+                        <span className="ml-1 text-xs text-amber-700 no-underline">
+                          terlambat
+                        </span>
+                      )}
                     </Td>
                     <Td>
                       {attempt.submission.passed_tests ?? "—"} /{" "}

@@ -18,11 +18,14 @@ export function AssignmentCards({ items }: { items: StudentAssignmentView[] }) {
             >
               {assignment.title}
             </Link>
-            <Badge
-              value={
-                summary.status === "NOT_SUBMITTED" ? "PENDING" : summary.status
-              }
-            />
+            <div className="flex shrink-0 flex-wrap items-center gap-1">
+              <Badge
+                value={
+                  summary.status === "NOT_SUBMITTED" ? "PENDING" : summary.status
+                }
+              />
+              {summary.effectiveLate && <Badge value="TERLAMBAT" />}
+            </div>
           </div>
 
           <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-sm text-slate-700">

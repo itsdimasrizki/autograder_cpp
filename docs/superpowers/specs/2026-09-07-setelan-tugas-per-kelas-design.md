@@ -43,10 +43,10 @@ Diputuskan bersama pemilik produk sebelum desain ini ditulis:
 | Pertanyaan | Keputusan |
 |---|---|
 | Field yang boleh berbeda per kelas | Tenggat, percobaan maksimal, mode penilaian. **Bukan** terbit/tarik. |
-| Push setelah tenggat | Tidak dipakai untuk nilai di website. |
+| Push setelah tenggat | **Tetap dihitung** sesuai mode penilaian. Web hanya menandai `TERLAMBAT`; asisten yang memutuskan diterima atau tidak. |
 | Push melebihi kuota | Tidak dipakai untuk nilai di website. Repo tidak pernah dikunci. |
 | Tampilan percobaan yang tersaring | Tetap tampil di riwayat, diberi label, nilainya diredupkan. |
-| Cap waktu penentu keterlambatan | `updated_at` dari workflow run (waktu workflow selesai) — perilaku yang sudah berjalan sekarang. |
+| Cap waktu penanda keterlambatan | `updated_at` dari workflow run (waktu workflow selesai) — perilaku yang sudah berjalan sekarang. |
 | Percobaan ERROR / masih berjalan | Tidak memakan jatah kuota. |
 | Admin mengubah nilai dasar setelah asisten menyesuaikan | Admin memilih saat menyimpan: simpan biasa, atau terapkan ke semua kelas. |
 
@@ -158,10 +158,10 @@ ke semua kelas".
 ### 6.1 Aturan
 
 > Sebuah percobaan **masuk hitungan nilai di website** kalau ia sudah
-> menghasilkan nilai, waktunya tidak melewati tenggat kelasnya, dan urutannya
-> masih di dalam kuota percobaan kelasnya.
+> menghasilkan nilai dan urutannya masih di dalam kuota percobaan kelasnya.
+> **Tenggat tidak menyaring apa pun** — ia hanya menandai.
 
-Tiga saringan, dijalankan atas percobaan yang sudah diurut kronologis
+Dua saringan, dijalankan atas percobaan yang sudah diurut kronologis
 (`submitted_at` menaik, `workflow_run_id` sebagai pemecah seri — urutan yang
 sudah dipakai `byTimeAscending` di `gradebook.ts`):
 
@@ -171,16 +171,15 @@ bukan `null` dan status termasuk `PASS`/`FAIL`/`ERROR`. Percobaan yang masih
 dihitung, dan **tidak memakan jatah kuota**. Praktikan dengan kuota 1 yang push
 pertamanya gagal kompilasi tidak kehilangan satu-satunya kesempatannya.
 
-**Saringan 2 — tenggat.** `submitted_at <= deadline`. Bila `deadline` `null`,
-saringan mati dan semua percobaan lolos.
-
-**Saringan 3 — kuota.** Percobaan yang lolos saringan 1 diberi nomor urut
+**Saringan 2 — kuota.** Percobaan yang lolos saringan 1 diberi nomor urut
 kronologis mulai dari 1; yang bernomor lebih besar dari `maxAttempts` tidak
-dihitung. Nomor urut ini **tidak peduli tenggat**, sehingga push kedua yang
-masih tepat waktu tetap "lewat kuota" bila kuotanya 1. Bila `maxAttempts`
-`null`, saringan mati.
+dihitung. Bila `maxAttempts` `null`, saringan mati.
 
-Saringan 2 dan 3 berdiri sendiri; satu percobaan bisa kena keduanya.
+**Tenggat bukan saringan.** Percobaan yang lewat tenggat tetap layak dan tetap
+ikut menentukan nilai pertama/terbaik/terakhir. Yang terjadi hanyalah percobaan
+itu ditandai `late`, dan penandanya diteruskan ke antarmuka. Keputusan menerima
+atau menolak keterlambatan ada pada asisten, bukan pada aplikasi — inilah
+perbedaan pokok dengan kuota, yang memang ditegakkan otomatis.
 
 ### 6.2 Algoritma
 
@@ -193,22 +192,25 @@ evaluateAttempts(submissions, config):
   untuk tiap s di sorted:
     jika !isScored(s):
       hasil.push({ s, eligible: false, late: false, overQuota: false,
-                   reason: "BELUM_DINILAI" })
+                   exclusion: "BELUM_DINILAI" })
       lanjut                                  // kuota tidak berkurang
 
     quotaNo += 1
     late      = config.deadline != null && s.submitted_at > config.deadline
     overQuota = config.maxAttempts != null && quotaNo > config.maxAttempts
-    hasil.push({ s, eligible: !late && !overQuota, late, overQuota })
+    hasil.push({ s, eligible: !overQuota, late, overQuota,
+                 exclusion: overQuota ? "LEWAT_KUOTA" : null })
 
   kembalikan hasil
 ```
 
-Nilai efektif dihitung hanya dari yang `eligible`, sesuai `scoringMode`:
-`FIRST` = yang pertama, `LATEST` = yang terakhir, `BEST` = yang tertinggi.
-`firstScore`, `latestScore`, dan `bestScore` di `StudentSummary` semuanya
-dihitung atas himpunan `eligible` yang sama, supaya angka yang ditampilkan
-tidak pernah bertentangan dengan nilai efektifnya.
+`late` sengaja tetap dihitung meski tidak mempengaruhi `eligible`; ia satu-satunya
+sumber penanda `TERLAMBAT` di antarmuka.
+
+Nilai efektif dihitung dari percobaan yang `eligible` sesuai `scoringMode`:
+`FIRST` = yang pertama, `LATEST` = yang terakhir, `BEST` = yang tertinggi
+(seri dimenangkan percobaan yang lebih awal, supaya hasilnya deterministik dan
+penanda keterlambatan tidak menyala tanpa alasan).
 
 Arti tiap field `StudentSummary` setelah perubahan, supaya tidak ada tafsir
 ganda saat implementasi:
@@ -216,16 +218,12 @@ ganda saat implementasi:
 | Field | Dihitung dari |
 |---|---|
 | `attempts` | **seluruh** percobaan, termasuk yang tidak dihitung dan yang belum dinilai. Kolom "Percobaan" tetap menunjukkan berapa kali praktikan benar-benar push. |
-| `countedAttempts` | baru — jumlah percobaan yang `eligible`. |
+| `countedAttempts` | jumlah percobaan yang `eligible`, yaitu yang lolos kuota. |
 | `firstScore`, `latestScore`, `bestScore` | hanya percobaan yang `eligible`. |
 | `effectiveScore` | salah satu dari ketiganya sesuai `scoringMode`; `null` bila tidak ada percobaan yang `eligible`. |
+| `effectiveLate` | apakah percobaan yang **menghasilkan** `effectiveScore` itu lewat tenggat. Sengaja bukan "pernah telat": yang perlu diputuskan asisten adalah angka yang sedang ia lihat. |
 | `lastSubmittedAt` | percobaan **terakhir apa pun**, layak atau tidak. Kolom "Pengumpulan Terakhir" menjawab "kapan orang ini terakhir menyentuh tugasnya", bukan "kapan nilainya terbentuk". |
 | `status` | status percobaan terakhir apa pun, seperti sekarang. |
-
-Praktikan yang punya percobaan tetapi tidak satu pun layak menampilkan
-`effectiveScore` `null` — di UI muncul sebagai `—` disertai keterangan singkat
-bahwa seluruh percobaannya di luar tenggat atau kuota, bukan dibiarkan kosong
-tanpa penjelasan.
 
 ### 6.3 Contoh
 
@@ -234,56 +232,54 @@ Kelas A · kuota 1 · tenggat 20:00 WIB · mode: nilai terbaik
 
 #1  18:30  PASS   60   ✓ dihitung
 #2  19:10  PASS   85   — lewat kuota
-#3  21:00  PASS  100   — lewat kuota · terlambat
+#3  21:00  PASS  100   — lewat kuota (juga terlambat)
 
 Nilai di website: 60
 ```
 
 ```
-Kelas B · kuota 1 · tanpa tenggat · mode: nilai pertama
+Kelas B · tanpa kuota · tenggat 20:00 WIB · mode: nilai terbaik
 
-#1  18:30  ERROR   —   — belum dinilai, tidak memakan jatah
-#2  18:45  PASS   70   ✓ dihitung
-#3  19:20  PASS   90   — lewat kuota
+#1  18:30  PASS   60   ✓ dihitung
+#2  21:00  PASS  100   ✓ dihitung, ditandai terlambat
 
-Nilai di website: 70
+Nilai di website: 100  [TERLAMBAT]
 ```
+
+Contoh kedua adalah inti aturannya: aplikasi tidak pernah membuang nilai karena
+telat. Ia menampilkan 100 berikut penanda, lalu asisten memutuskan sendiri.
 
 ### 6.4 Yang terjadi setelah tenggat lewat
 
 - Repository GitHub praktikan **tidak dikunci**. Tidak ada cron, tidak ada
   pencabutan akses tulis. Praktikan bebas terus push dan berlatih di rumah.
 - GitHub Actions **tetap berjalan** dan hasilnya tetap terlihat di tab Actions
-  repo pribadi masing-masing. Ini di luar kendali aplikasi dan tidak disentuh.
-- Webhook **tetap diterima dan submission tetap disimpan**. Tidak ada percobaan
-  yang dibuang. `ingestGradingRun` tidak berubah sama sekali.
-- Barisnya tetap muncul di "Riwayat Percobaan" dengan nilai terlihat namun
-  diredupkan dan diberi label `tidak dihitung` / `terlambat`.
-- Gradebook asisten hanya memakai percobaan yang lolos ketiga saringan.
+  repo pribadi masing-masing.
+- Webhook **tetap diterima dan submission tetap disimpan**.
+  `ingestGradingRun` tidak berubah sama sekali.
+- **Nilainya tetap muncul** dan tetap ikut mode penilaian kelas.
+- Kolom STATUS di gradebook mendapat lencana `TERLAMBAT` bila nilai yang
+  berlaku berasal dari push yang telat. Baris yang telat di Riwayat Percobaan
+  diberi label "terlambat".
 
 **Seluruh penyaringan terjadi saat membaca, bukan saat menulis.** Tidak ada
 kolom baru di `submissions` dan tidak ada perubahan pada jalur webhook.
 
 ### 6.5 Konsekuensi yang disadari
 
-**Mengubah tenggat atau kuota langsung mengubah nilai yang tampil**, termasuk
-untuk percobaan yang sudah lewat, karena kelayakan dihitung ulang tiap kali
-halaman dibuka. Ini disengaja: asisten yang salah ketik tenggat bisa
-membetulkannya dan nilai langsung pulih. Sisi tajamnya, memperketat tenggat
-setelah praktikum selesai akan menurunkan nilai orang. Sifat ini sama dengan
-`scoring_mode` yang sudah berlaku sekarang, jadi konsisten dengan janji
-"berpindah mode tidak menghilangkan riwayat".
+**Mengubah kuota langsung mengubah nilai yang tampil**, termasuk untuk percobaan
+yang sudah lewat, karena kelayakan dihitung ulang tiap kali halaman dibuka.
+Mengubah tenggat tidak pernah mengubah nilai — ia hanya memindahkan penanda.
+Sifat ini sama dengan `scoring_mode` yang sudah berlaku sekarang, jadi konsisten
+dengan janji "berpindah mode tidak menghilangkan riwayat".
 
 **Cap waktu memakai waktu workflow selesai, bukan waktu push.** `submitted_at`
 diisi dari `run.updated_at` (`lib/grading/ingest.ts:157`), yang untuk run yang
 sudah selesai berarti waktu tes selesai berjalan. Praktikan yang push 19:58 tapi
-tesnya berjalan tiga menit tercatat 20:01 dan dicap terlambat meski push-nya
-sebelum tenggat. Pilihan ini diambil sadar oleh pemilik produk demi menjaga
-perilaku ingest tetap seperti sekarang. Mitigasinya bersifat operasional:
-tetapkan tenggat dengan jeda longgar dari akhir sesi praktikum, misalnya sesi
-selesai 20:00 dan tenggat diisi 20:15. Alternatif `run_started_at` dan field
-"toleransi keterlambatan" sengaja **tidak** diimplementasikan; keduanya dicatat
-di bagian Di Luar Lingkup.
+tesnya berjalan tiga menit tercatat 20:01 dan ditandai terlambat meski push-nya
+sebelum tenggat. Sejak tenggat tidak lagi memotong nilai, akibat terburuknya
+tinggal penanda yang keliru — asisten dapat mengabaikannya. Alternatif
+`run_started_at` sengaja tidak diimplementasikan; lihat Di Luar Lingkup.
 
 ## 7. Adu setelan admin dan asisten
 
@@ -405,10 +401,15 @@ yang sudah ada:
 Sengaja tidak dikerjakan, dicatat supaya keputusannya tidak hilang:
 
 - **Terbit/tarik per kelas.** `published` tetap per-tugas dan tetap milik admin.
-- **Toleransi keterlambatan (menit).** Tidak ada field denda maupun jeda.
+- **Toleransi keterlambatan (menit) dan potongan nilai.** Tenggat tidak
+  memotong apa pun, jadi tidak ada field denda maupun jeda.
+- **Penolakan otomatis atas keterlambatan.** Aplikasi hanya menandai; tidak ada
+  tombol "buang semua yang telat". Asisten memutuskan per orang.
 - **`run_started_at` sebagai cap waktu.** Lihat bagian 6.5.
 - **Penguncian repository GitHub saat tenggat atau kuota habis.** Tidak ada cron
   dan tidak ada pencabutan akses tulis.
+- **Menampilkan "nilai seandainya yang telat dibuang".** Asisten membandingkan
+  sendiri lewat Riwayat Percobaan.
 - **Plafon tenggat.** Tenggat kelas bebas, tidak dibatasi tenggat dasar.
 - **Nilai maksimal, judul, deskripsi, dan template per kelas.** Tetap tunggal
   untuk seluruh course.

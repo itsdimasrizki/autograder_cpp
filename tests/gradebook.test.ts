@@ -121,6 +121,7 @@ describe("ringkasan nilai mahasiswa", () => {
     expect(summary).toMatchObject({
       attempts: 0,
       countedAttempts: 0,
+      effectiveLate: false,
       latestScore: null,
       bestScore: null,
       effectiveScore: null,

@@ -215,6 +215,11 @@ export default async function AssignmentPage({
                             {ATTEMPT_EXCLUSION_LABEL[attempt.exclusion]}
                           </span>
                         )}
+                      {attempt.late && (
+                        <span className="ml-1 text-xs text-amber-700 no-underline">
+                          terlambat
+                        </span>
+                      )}
                     </Td>
                     <Td>
                       {attempt.submission.passed_tests ?? "—"} /{" "}
@@ -395,13 +400,19 @@ export default async function AssignmentPage({
                       )}
                     </Td>
                     <Td>
-                      <Badge
-                        value={
-                          summary.status === "NOT_SUBMITTED"
-                            ? "PENDING"
-                            : summary.status
-                        }
-                      />
+                      <div className="flex flex-wrap items-center gap-1">
+                        <Badge
+                          value={
+                            summary.status === "NOT_SUBMITTED"
+                              ? "PENDING"
+                              : summary.status
+                          }
+                        />
+                        {/* Nilainya tetap berlaku; ini hanya memberi tahu
+                            asisten bahwa angka itu datang dari push yang
+                            telat, sehingga ia bisa memutuskan sendiri. */}
+                        {summary.effectiveLate && <Badge value="TERLAMBAT" />}
+                      </div>
                     </Td>
                     <Td className="font-medium">
                       {summary.effectiveScore ?? "—"}
@@ -455,7 +466,7 @@ export default async function AssignmentPage({
 
               <Field
                 label="Tenggat (opsional, WIB)"
-                hint="Kosongkan untuk kelas tanpa tenggat. Percobaan setelah tenggat tetap tersimpan dan tetap terlihat, tetapi tidak masuk hitungan nilai."
+                hint="Penanda saja, tidak memotong nilai. Percobaan setelah tenggat tetap dihitung sesuai mode penilaian, hanya diberi tanda TERLAMBAT di gradebook — Anda yang memutuskan diterima atau tidak."
               >
                 <input
                   name="deadline"

@@ -59,7 +59,7 @@ describe("kelayakan percobaan", () => {
     expect(hasil.map((a) => a.exclusion)).toEqual([null, null]);
   });
 
-  it("menyaring dengan tenggat dan kuota sekaligus", () => {
+  it("hanya kuota yang menyaring; tenggat hanya menandai", () => {
     // Kuota 1, tenggat 20:00 WIB, mode nilai terbaik.
     const percobaan = [
       submission(60, "FAIL", "2026-09-07T11:30:00.000Z"), // 18:30 WIB
@@ -73,11 +73,31 @@ describe("kelayakan percobaan", () => {
     expect(hasil.map((a) => a.exclusion)).toEqual([
       null,
       "LEWAT_KUOTA",
-      "TERLAMBAT_DAN_LEWAT_KUOTA",
+      "LEWAT_KUOTA",
     ]);
+    // Keterlambatan dibawa terpisah, tidak ikut membatalkan kelayakan.
+    expect(hasil.map((a) => a.late)).toEqual([false, false, true]);
 
-    // Nilai terbaik tetap 60 karena 85 dan 100 tidak layak.
     expect(summarizeStudent("dimas", percobaan, cfg).effectiveScore).toBe(60);
+  });
+
+  it("percobaan terlambat tetap dihitung bila kuota masih tersisa", () => {
+    // Inti aturannya: aplikasi tidak pernah membuang nilai karena telat.
+    // Asisten yang memutuskan, aplikasi hanya memberi tahu.
+    const percobaan = [
+      submission(60, "FAIL", "2026-09-07T11:30:00.000Z"),
+      submission(100, "PASS", "2026-09-07T14:00:00.000Z"), // lewat tenggat
+    ];
+    const cfg = config({ deadline: TENGGAT, scoringMode: "BEST" });
+
+    const hasil = evaluateAttempts(percobaan, cfg);
+    expect(hasil.map((a) => a.eligible)).toEqual([true, true]);
+    expect(hasil.map((a) => a.exclusion)).toEqual([null, null]);
+    expect(hasil[1].late).toBe(true);
+
+    const ringkasan = summarizeStudent("dimas", percobaan, cfg);
+    expect(ringkasan.effectiveScore).toBe(100);
+    expect(ringkasan.countedAttempts).toBe(2);
   });
 
   it("percobaan tepat waktu tetap lewat kuota bila kuotanya sudah habis", () => {
@@ -93,20 +113,12 @@ describe("kelayakan percobaan", () => {
     expect(hasil[1].exclusion).toBe("LEWAT_KUOTA");
   });
 
-  it("percobaan terlambat ditandai walau kuota masih tersisa", () => {
-    const hasil = evaluateAttempts(
-      [submission(100, "PASS", "2026-09-07T14:00:00.000Z")],
-      config({ deadline: TENGGAT, maxAttempts: 5 }),
-    );
-    expect(hasil[0].exclusion).toBe("TERLAMBAT");
-    expect(hasil[0].overQuota).toBe(false);
-  });
-
-  it("tepat pada detik tenggat masih dihitung", () => {
+  it("tepat pada detik tenggat belum terhitung terlambat", () => {
     const hasil = evaluateAttempts(
       [submission(70, "PASS", TENGGAT)],
       config({ deadline: TENGGAT }),
     );
+    expect(hasil[0].late).toBe(false);
     expect(hasil[0].eligible).toBe(true);
   });
 
@@ -187,13 +199,12 @@ describe("kelayakan percobaan", () => {
     expect(percobaan.map((s) => s.id)).toEqual(urutanAwal);
   });
 
-  it("tenggat yang tidak valid diperlakukan sebagai tanpa tenggat", () => {
-    // Gagal ke arah aman: lebih baik menghitung percobaan yang meragukan
-    // daripada membuang nilai praktikan karena data rusak.
+  it("tenggat yang tidak valid tidak menandai apa pun sebagai terlambat", () => {
     const hasil = evaluateAttempts(
       [submission(70, "PASS", "2026-09-07T14:00:00.000Z")],
       config({ deadline: "bukan tanggal" }),
     );
+    expect(hasil[0].late).toBe(false);
     expect(hasil[0].eligible).toBe(true);
   });
 });
@@ -227,16 +238,68 @@ describe("ringkasan setelah penyaringan", () => {
     expect(ringkasan.bestScore).toBe(60);
   });
 
-  it("tanpa satu pun percobaan yang layak, nilainya null tapi status tetap terlihat", () => {
-    const semuaTerlambat = [submission(100, "PASS", "2026-09-07T14:00:00.000Z")];
+  it("tanpa satu pun percobaan yang dinilai, nilainya null tapi status terlihat", () => {
+    const belumDinilai = [submission(null, "RUNNING", "2026-09-07T14:00:00.000Z")];
     const ringkasan = summarizeStudent(
       "dimas",
-      semuaTerlambat,
+      belumDinilai,
       config({ deadline: TENGGAT }),
     );
     expect(ringkasan.effectiveScore).toBeNull();
     expect(ringkasan.countedAttempts).toBe(0);
     expect(ringkasan.attempts).toBe(1);
-    expect(ringkasan.status).toBe("PASS");
+    expect(ringkasan.status).toBe("RUNNING");
+  });
+});
+
+describe("penanda terlambat pada nilai yang berlaku", () => {
+  const tepatWaktu = submission(60, "FAIL", "2026-09-07T11:30:00.000Z");
+  const telat = submission(100, "PASS", "2026-09-07T14:00:00.000Z");
+
+  it("menyala saat nilai berlaku berasal dari push yang telat", () => {
+    // Mode terbaik memilih 100 yang telat, jadi asisten harus diberi tahu.
+    const ringkasan = summarizeStudent(
+      "dimas",
+      [tepatWaktu, telat],
+      config({ deadline: TENGGAT, scoringMode: "BEST" }),
+    );
+    expect(ringkasan.effectiveScore).toBe(100);
+    expect(ringkasan.effectiveLate).toBe(true);
+  });
+
+  it("padam saat nilai berlaku berasal dari push tepat waktu", () => {
+    // Orang yang sama, mode nilai pertama: yang berlaku 60 dan tepat waktu,
+    // jadi tidak ada yang perlu diputuskan asisten meski ia pernah telat.
+    const ringkasan = summarizeStudent(
+      "dimas",
+      [tepatWaktu, telat],
+      config({ deadline: TENGGAT, scoringMode: "FIRST" }),
+    );
+    expect(ringkasan.effectiveScore).toBe(60);
+    expect(ringkasan.effectiveLate).toBe(false);
+  });
+
+  it("padam bila tugas memang tidak punya tenggat", () => {
+    const ringkasan = summarizeStudent(
+      "dimas",
+      [tepatWaktu, telat],
+      config({ scoringMode: "LATEST" }),
+    );
+    expect(ringkasan.effectiveScore).toBe(100);
+    expect(ringkasan.effectiveLate).toBe(false);
+  });
+
+  it("nilai tertinggi yang seri dimenangkan percobaan yang lebih awal", () => {
+    // Yang lebih awal lebih kecil kemungkinannya telat, jadi penandanya tidak
+    // menyala tanpa alasan.
+    const seriTepatWaktu = submission(90, "PASS", "2026-09-07T11:30:00.000Z");
+    const seriTelat = submission(90, "PASS", "2026-09-07T14:00:00.000Z");
+    const ringkasan = summarizeStudent(
+      "dimas",
+      [seriTepatWaktu, seriTelat],
+      config({ deadline: TENGGAT, scoringMode: "BEST" }),
+    );
+    expect(ringkasan.effectiveScore).toBe(90);
+    expect(ringkasan.effectiveLate).toBe(false);
   });
 });

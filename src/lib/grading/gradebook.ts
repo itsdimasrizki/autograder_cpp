@@ -9,18 +9,21 @@ import type { ResolvedAssignmentConfig } from "@/lib/grading/config";
  * Ringkasan nilai. Murni: menerima daftar submission apa adanya dan menghitung
  * tampilan gradebook.
  *
- * Riwayat tidak pernah dibuang. Tenggat dan kuota percobaan menyaring saat
- * MEMBACA, bukan saat menyimpan — tabel submissions dan jalur webhook tidak
- * tahu-menahu soal keduanya. Konsekuensinya, mengubah tenggat atau kuota
- * sebuah kelas langsung memperbarui nilai yang tampil, termasuk untuk
- * percobaan yang sudah lewat.
+ * Riwayat tidak pernah dibuang. Yang menyaring nilai hanyalah KUOTA
+ * percobaan, dan penyaringannya terjadi saat MEMBACA, bukan saat menyimpan —
+ * tabel submissions dan jalur webhook tidak tahu-menahu soal itu.
+ *
+ * TENGGAT tidak menyaring apa pun. Percobaan yang lewat tenggat tetap dihitung
+ * sesuai mode penilaian kelasnya dan nilainya tetap tampil; ia hanya ditandai
+ * `late` supaya asisten tahu, lalu asisten sendiri yang memutuskan mau
+ * memakainya atau tidak. Keputusan itu sengaja tidak diotomatiskan.
  */
 
 export interface StudentSummary {
   userId: string;
   /** SELURUH percobaan, termasuk yang tidak dihitung dan yang belum dinilai. */
   attempts: number;
-  /** Percobaan yang lolos tenggat dan kuota. */
+  /** Percobaan yang lolos kuota. */
   countedAttempts: number;
   /** Nilai dari percobaan LAYAK pertama yang sudah dinilai. */
   firstScore: number | null;
@@ -29,22 +32,31 @@ export interface StudentSummary {
   bestScore: number | null;
   /** Nilai yang berlaku sesuai scoring_mode yang berlaku untuk kelas ini. */
   effectiveScore: number | null;
+  /**
+   * Apakah percobaan yang MENGHASILKAN effectiveScore itu lewat tenggat.
+   *
+   * Sengaja bukan "orang ini pernah telat": yang perlu diketahui asisten
+   * adalah apakah angka yang sedang ia lihat berasal dari push yang telat.
+   */
+  effectiveLate: boolean;
   /** Percobaan terakhir apa pun, layak atau tidak. */
   lastSubmittedAt: string | null;
   status: SubmissionStatus | "NOT_SUBMITTED";
 }
 
-/** Alasan sebuah percobaan tidak masuk hitungan nilai. */
-export type AttemptExclusion =
-  | "BELUM_DINILAI"
-  | "TERLAMBAT"
-  | "LEWAT_KUOTA"
-  | "TERLAMBAT_DAN_LEWAT_KUOTA";
+/**
+ * Alasan sebuah percobaan tidak masuk hitungan nilai.
+ *
+ * Keterlambatan TIDAK ada di sini: percobaan yang telat tetap dihitung, dan
+ * status telatnya dibawa terpisah lewat `EvaluatedAttempt.late`.
+ */
+export type AttemptExclusion = "BELUM_DINILAI" | "LEWAT_KUOTA";
 
 export interface EvaluatedAttempt {
   submission: Submission;
   /** Nomor urut di antara percobaan yang sudah dinilai; null bila belum. */
   quotaNumber: number | null;
+  /** Lewat tenggat kelas. Penanda saja — tidak mempengaruhi `eligible`. */
   late: boolean;
   overQuota: boolean;
   eligible: boolean;
@@ -72,17 +84,17 @@ function byTimeAscending(a: Submission, b: Submission): number {
 /**
  * Menentukan percobaan mana yang masuk hitungan nilai di website.
  *
- * Tiga saringan, atas percobaan yang sudah diurut kronologis:
+ * Dua saringan, atas percobaan yang sudah diurut kronologis:
  *
  *   1. Sudah dinilai. Percobaan QUEUED/RUNNING dan ERROR tanpa nilai dilewati
  *      sepenuhnya dan TIDAK memakan jatah kuota — praktikan berkuota 1 yang
  *      push pertamanya gagal kompilasi tidak kehilangan kesempatannya.
- *   2. Tenggat. submitted_at tidak melewati tenggat kelas.
- *   3. Kuota. Nomor urut di antara percobaan yang sudah dinilai tidak melebihi
- *      kuota kelas. Nomor ini tidak peduli tenggat, jadi push kedua yang masih
- *      tepat waktu tetap lewat kuota bila kuotanya 1.
+ *   2. Kuota. Nomor urut di antara percobaan yang sudah dinilai tidak melebihi
+ *      kuota kelas.
  *
- * Saringan 2 dan 3 berdiri sendiri; satu percobaan bisa kena keduanya.
+ * Tenggat BUKAN saringan. Percobaan yang lewat tenggat tetap `eligible` dan
+ * tetap masuk hitungan mode penilaian; ia hanya ditandai `late` supaya terlihat
+ * asisten. Yang memutuskan diterima atau tidak adalah asisten, bukan aplikasi.
  */
 export function evaluateAttempts(
   submissions: Submission[],
@@ -119,17 +131,18 @@ export function evaluateAttempts(
         adaTenggat && new Date(submission.submitted_at).getTime() > deadlineMs;
       const overQuota =
         config.maxAttempts !== null && quotaNumber > config.maxAttempts;
-      const eligible = !late && !overQuota;
 
-      const exclusion: AttemptExclusion | null = eligible
-        ? null
-        : late && overQuota
-          ? "TERLAMBAT_DAN_LEWAT_KUOTA"
-          : late
-            ? "TERLAMBAT"
-            : "LEWAT_KUOTA";
+      // Hanya kuota yang menentukan kelayakan; keterlambatan tidak.
+      const eligible = !overQuota;
 
-      return { submission, quotaNumber, late, overQuota, eligible, exclusion };
+      return {
+        submission,
+        quotaNumber,
+        late,
+        overQuota,
+        eligible,
+        exclusion: eligible ? null : "LEWAT_KUOTA",
+      };
     });
 }
 
@@ -151,24 +164,34 @@ export function summarizeStudent(
       latestScore: null,
       bestScore: null,
       effectiveScore: null,
+      effectiveLate: false,
       lastSubmittedAt: null,
       status: "NOT_SUBMITTED",
     };
   }
 
-  const nilaiLayak = evaluateAttempts(mine, config)
-    .filter((attempt) => attempt.eligible)
-    .map((attempt) => attempt.submission.score as number);
+  // Yang dilacak adalah percobaannya, bukan sekadar angkanya, supaya bisa
+  // diketahui apakah nilai yang berlaku berasal dari push yang telat.
+  const layak = evaluateAttempts(mine, config).filter(
+    (attempt) => attempt.eligible,
+  );
 
-  const firstScore = nilaiLayak.length > 0 ? nilaiLayak[0] : null;
-  const latestScore =
-    nilaiLayak.length > 0 ? nilaiLayak[nilaiLayak.length - 1] : null;
-  const bestScore = nilaiLayak.length > 0 ? Math.max(...nilaiLayak) : null;
+  const skor = (attempt: EvaluatedAttempt) => attempt.submission.score as number;
 
-  const effectiveScore = {
-    FIRST: firstScore,
-    BEST: bestScore,
-    LATEST: latestScore,
+  const pertama = layak[0] ?? null;
+  const terakhir = layak[layak.length - 1] ?? null;
+  // Seri dimenangkan percobaan yang lebih awal: hasilnya deterministik, dan
+  // yang lebih awal lebih kecil kemungkinannya terlambat.
+  const terbaik = layak.reduce<EvaluatedAttempt | null>(
+    (max, attempt) =>
+      max === null || skor(attempt) > skor(max) ? attempt : max,
+    null,
+  );
+
+  const berlaku = {
+    FIRST: pertama,
+    BEST: terbaik,
+    LATEST: terakhir,
   }[config.scoringMode];
 
   const last = mine[mine.length - 1];
@@ -176,11 +199,12 @@ export function summarizeStudent(
   return {
     userId,
     attempts: mine.length,
-    countedAttempts: nilaiLayak.length,
-    firstScore,
-    latestScore,
-    bestScore,
-    effectiveScore,
+    countedAttempts: layak.length,
+    firstScore: pertama ? skor(pertama) : null,
+    latestScore: terakhir ? skor(terakhir) : null,
+    bestScore: terbaik ? skor(terbaik) : null,
+    effectiveScore: berlaku ? skor(berlaku) : null,
+    effectiveLate: berlaku?.late ?? false,
     lastSubmittedAt: last.submitted_at,
     status: last.status,
   };
@@ -196,9 +220,7 @@ export const SCORING_MODE_LABEL: Record<ScoringMode, string> = {
 /** Label singkat alasan sebuah percobaan tidak dihitung. */
 export const ATTEMPT_EXCLUSION_LABEL: Record<AttemptExclusion, string> = {
   BELUM_DINILAI: "belum dinilai",
-  TERLAMBAT: "terlambat",
   LEWAT_KUOTA: "lewat kuota",
-  TERLAMBAT_DAN_LEWAT_KUOTA: "lewat kuota · terlambat",
 };
 
 /** Ringkasan untuk sekumpulan mahasiswa (satu kelas pada satu tugas). */
