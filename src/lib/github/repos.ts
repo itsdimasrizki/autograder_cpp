@@ -48,7 +48,7 @@ export async function generateFromTemplate(params: {
         name: params.name,
         description: params.description ?? "",
         // Repository mahasiswa TIDAK PERNAH publik.
-        private: true,
+        private: false,
         include_all_branches: false,
       }),
     },
