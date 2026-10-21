@@ -10,9 +10,12 @@ import {
   canManageClassRoster,
   canViewStudentData,
 } from "@/lib/auth/policy";
-import { getAssignment } from "@/lib/db/assignments";
-import { getClass, listClassMembers } from "@/lib/db/courses";
-import { findRepository } from "@/lib/db/repositories";
+import { getAssignment, listAssignments } from "@/lib/db/assignments";
+import { getClass, getCourse, listClassMembers } from "@/lib/db/courses";
+import {
+  findRepository,
+  listRepositoriesForAssignment,
+} from "@/lib/db/repositories";
 import { refreshRepository } from "@/lib/grading/sync";
 import { runAction, safePath, withResult } from "@/lib/actions/result";
 
@@ -122,6 +125,90 @@ export async function refreshClassAction(formData: FormData) {
   const path = safePath(
     `/assignments/${assignmentId}?classId=${classId}`,
     "/dashboard",
+  );
+  revalidatePath(path);
+  redirect(withResult(path, message));
+}
+
+/**
+ * Menyegarkan nilai seluruh tugas pada satu kelas sekaligus.
+ *
+ * Dipakai dari halaman pembukuan: asisten atau admin menekan tombol
+ * "Segarkan Seluruh Nilai" dan semua repository di kelas tersebut
+ * ditarik ulang hasilnya dari GitHub Actions.
+ */
+export async function refreshGradebookAction(formData: FormData) {
+  const courseId = String(formData.get("courseId") ?? "");
+  const classId = String(formData.get("classId") ?? "");
+
+  const message = await runAction(async () => {
+    const ctx = await requireAccessContext();
+
+    const input = z
+      .object({ courseId: uuid, classId: uuid })
+      .parse({ courseId, classId });
+
+    const klass = await getClass(input.classId);
+    if (!klass) throw new Error("Kelas tidak ditemukan.");
+
+    const course = await getCourse(input.courseId);
+    if (!course) throw new Error("Bab / mata kuliah tidak ditemukan.");
+
+    if (klass.course_id !== course.id) {
+      throw new Error("Kelas ini bukan milik mata kuliah tersebut.");
+    }
+
+    assert(
+      canManageClassRoster(ctx, input.classId),
+      "Anda bukan asisten kelas ini.",
+    );
+
+    const assignments = await listAssignments(course.id);
+    const members = await listClassMembers(input.classId, "STUDENT");
+    const userIds = new Set(members.map((m) => m.user.id));
+    const memberByUserId = new Map(members.map((m) => [m.user.id, m.user]));
+
+    const failures: string[] = [];
+    let totalRefreshed = 0;
+
+    for (const assignment of assignments) {
+      const repos = await listRepositoriesForAssignment(assignment.id);
+      const targetRepos = repos.filter(
+        (r) => r.status === "READY" && userIds.has(r.user_id),
+      );
+
+      for (const repository of targetRepos) {
+        const targetMemberships = await membershipsOf(repository.user_id);
+        if (!canViewStudentData(ctx, repository.user_id, targetMemberships)) {
+          continue;
+        }
+
+        const user = memberByUserId.get(repository.user_id);
+        const login = user?.github_login ?? repository.user_id;
+
+        try {
+          await refreshRepository({ repository, assignment });
+          totalRefreshed++;
+        } catch (error) {
+          failures.push(
+            `P${assignment.meeting_number} @${login}: ${
+              error instanceof Error ? error.message : "gagal"
+            }`,
+          );
+        }
+      }
+    }
+
+    if (failures.length > 0) {
+      throw new Error(
+        `Berhasil menyegarkan ${totalRefreshed} repository, namun ${failures.length} gagal. ${failures.slice(0, 3).join("; ")}`,
+      );
+    }
+  });
+
+  const path = safePath(
+    `/gradebook?courseId=${courseId}&classId=${classId}`,
+    "/gradebook",
   );
   revalidatePath(path);
   redirect(withResult(path, message));

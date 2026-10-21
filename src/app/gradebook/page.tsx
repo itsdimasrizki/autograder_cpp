@@ -1,11 +1,17 @@
 import Link from "next/link";
 import { requireRole } from "@/lib/auth/current-user";
 import { loadAccessContext } from "@/lib/auth/authorize";
-import { canViewClass, isSuperAdmin } from "@/lib/auth/policy";
+import {
+  canManageClassRoster,
+  isAssistantOfClass,
+  isSuperAdmin,
+} from "@/lib/auth/policy";
 import { listCoursesByIds, listAllCourses, listClasses } from "@/lib/db/courses";
 import { loadClassGradebook } from "@/lib/views/gradebook";
+import { refreshGradebookAction } from "@/lib/actions/grading";
 import { Shell } from "@/components/shell";
 import { Card, Empty, PageHeader } from "@/components/ui";
+import { ConfirmButton } from "@/components/confirm";
 
 export const dynamic = "force-dynamic";
 
@@ -21,18 +27,35 @@ export default async function GradebookPage({
   const params = await searchParams;
   const user = await requireRole("SUPER_ADMIN", "ASSISTANT");
   const ctx = await loadAccessContext(user);
+
+  const assistantCourseIds = [
+    ...new Set(
+      ctx.memberships
+        .filter((m) => m.role === "ASSISTANT")
+        .map((m) => m.course_id),
+    ),
+  ];
+
   const courses = isSuperAdmin(ctx)
     ? await listAllCourses()
-    : await listCoursesByIds([...new Set(ctx.memberships.map((item) => item.course_id))]);
+    : await listCoursesByIds(assistantCourseIds);
   const selectedCourse = courses.find((course) => course.id === params.courseId) ?? courses[0];
   const allClasses = selectedCourse ? await listClasses(selectedCourse.id) : [];
-  const visibleClasses = allClasses.filter((klass) => canViewClass(ctx, klass.id));
+
+  // Asisten hanya melihat kelas yang diampunya saja; SUPER_ADMIN melihat semua kelas.
+  const visibleClasses = isSuperAdmin(ctx)
+    ? allClasses
+    : allClasses.filter((klass) => isAssistantOfClass(ctx, klass.id));
   const selectedClass =
     visibleClasses.find((klass) => klass.id === params.classId) ?? visibleClasses[0];
   const gradebook =
     selectedCourse && selectedClass
       ? await loadClassGradebook({ course: selectedCourse, klass: selectedClass })
       : null;
+
+  const canRefresh =
+    selectedClass !== undefined &&
+    canManageClassRoster(ctx, selectedClass.id);
 
   return (
     <Shell user={user}>
@@ -41,12 +64,26 @@ export default async function GradebookPage({
         subtitle="Rekap otomatis per bab atau mata kuliah, kelas, dan pertemuan."
         action={
           gradebook ? (
-            <Link
-              href={`/api/gradebook/export?courseId=${gradebook.course.id}&classId=${gradebook.klass.id}`}
-              className="inline-flex items-center rounded border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50"
-            >
-              Export Excel
-            </Link>
+            <div className="flex flex-wrap gap-2">
+              {canRefresh && (
+                <form action={refreshGradebookAction}>
+                  <input type="hidden" name="courseId" value={gradebook.course.id} />
+                  <input type="hidden" name="classId" value={gradebook.klass.id} />
+                  <ConfirmButton
+                    variant="secondary"
+                    message={`Segarkan nilai seluruh tugas untuk ${gradebook.klass.name}? Proses ini akan menarik data penilaian terbaru dari GitHub Actions untuk semua mahasiswa di kelas ini.`}
+                  >
+                    Segarkan seluruh nilai
+                  </ConfirmButton>
+                </form>
+              )}
+              <Link
+                href={`/api/gradebook/export?courseId=${gradebook.course.id}&classId=${gradebook.klass.id}`}
+                className="inline-flex items-center rounded border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50"
+              >
+                Export Excel
+              </Link>
+            </div>
           ) : undefined
         }
       />

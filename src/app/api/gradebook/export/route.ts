@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { getCourse, getClass } from "@/lib/db/courses";
 import { requireAccessContext } from "@/lib/auth/authorize";
-import { canViewClass } from "@/lib/auth/policy";
+import { canManageClassRoster } from "@/lib/auth/policy";
 import { loadClassGradebook } from "@/lib/views/gradebook";
 
 export const dynamic = "force-dynamic";
@@ -27,7 +27,12 @@ export async function GET(request: NextRequest) {
   const courseId = request.nextUrl.searchParams.get("courseId") ?? "";
   const classId = request.nextUrl.searchParams.get("classId") ?? "";
   const [course, klass] = await Promise.all([getCourse(courseId), getClass(classId)]);
-  if (!course || !klass || klass.course_id !== course.id || !canViewClass(ctx, klass.id)) {
+  if (
+    !course ||
+    !klass ||
+    klass.course_id !== course.id ||
+    !canManageClassRoster(ctx, klass.id)
+  ) {
     return new Response("Forbidden", { status: 403 });
   }
 
