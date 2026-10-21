@@ -37,7 +37,10 @@ import {
   updateAssignmentAction,
   updateClassSettingsAction,
 } from "@/lib/actions/assignments";
-import { provisionClassAction } from "@/lib/actions/repositories";
+import {
+  provisionClassAction,
+  revokeRepositoryAction,
+} from "@/lib/actions/repositories";
 import { refreshClassAction, refreshStudentAction } from "@/lib/actions/grading";
 import { Shell } from "@/components/shell";
 import { Forbidden } from "@/components/forbidden";
@@ -362,6 +365,7 @@ export default async function AssignmentPage({
                 "Nilai",
                 "Percobaan",
                 "Pengumpulan Terakhir",
+                "Aksi",
               ]}
             >
               {members.map((member) => {
@@ -426,6 +430,21 @@ export default async function AssignmentPage({
                       )}
                     </Td>
                     <Td>{formatDate(summary.lastSubmittedAt)}</Td>
+                    <Td>
+                      {repository && repository.status !== "REVOKED" && (
+                        <form action={revokeRepositoryAction}>
+                          <input type="hidden" name="assignmentId" value={assignment.id} />
+                          <input type="hidden" name="classId" value={selectedClass.id} />
+                          <input type="hidden" name="userId" value={member.user.id} />
+                          <ConfirmButton
+                            variant="danger"
+                            message={`Batalkan repository @${member.user.github_login}? Akses mahasiswa akan dicabut.`}
+                          >
+                            Batalkan
+                          </ConfirmButton>
+                        </form>
+                      )}
+                    </Td>
                   </tr>
                 );
               })}
@@ -436,6 +455,31 @@ export default async function AssignmentPage({
         <Card>
           <Empty>Tidak ada kelas yang dapat Anda akses pada tugas ini.</Empty>
         </Card>
+      )}
+
+      {selectedClass && members.length > 0 && (
+        <div className="mt-6">
+          <Card
+            title="Pilih mahasiswa yang dibagikan repository"
+            action={<span className="text-xs text-slate-500">Centang untuk mengecualikan</span>}
+          >
+            <form action={provisionClassAction}>
+              <input type="hidden" name="assignmentId" value={assignment.id} />
+              <input type="hidden" name="classId" value={selectedClass.id} />
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {members.map((member) => (
+                  <label key={member.user.id} className="flex items-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm">
+                    <input type="checkbox" name="skipUserId" value={member.user.id} />
+                    <span>{member.user.display_name ?? member.user.github_login}</span>
+                  </label>
+                ))}
+              </div>
+              <Button type="submit" variant="secondary" className="mt-4">
+                Sediakan untuk yang tidak dicentang
+              </Button>
+            </form>
+          </Card>
+        </div>
       )}
 
       {selectedClass && canManageThisClass && (

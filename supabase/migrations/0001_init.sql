@@ -36,7 +36,7 @@ do $$ begin
 exception when duplicate_object then null; end $$;
 
 do $$ begin
-  create type repo_status as enum ('PENDING', 'READY', 'FAILED');
+  create type repo_status as enum ('PENDING', 'READY', 'FAILED', 'REVOKED');
 exception when duplicate_object then null; end $$;
 
 -- -----------------------------------------------------------------------------

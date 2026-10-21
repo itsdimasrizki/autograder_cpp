@@ -10,7 +10,7 @@ export type MemberRole = "ASSISTANT" | "STUDENT";
 export type ScoringMode = "BEST" | "LATEST" | "FIRST";
 export type SubmissionStatus = "QUEUED" | "RUNNING" | "PASS" | "FAIL" | "ERROR";
 export type TestStatus = "PASS" | "FAIL" | "SKIP";
-export type RepoStatus = "PENDING" | "READY" | "FAILED";
+export type RepoStatus = "PENDING" | "READY" | "FAILED" | "REVOKED";
 
 export type User = {
   id: string;

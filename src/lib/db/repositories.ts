@@ -91,3 +91,37 @@ export async function upsertRepository(input: {
       .single(),
   );
 }
+
+export async function deleteRepositoryRecord(
+  assignmentId: string,
+  userId: string,
+): Promise<void> {
+  const { error } = await db()
+    .from("student_repositories")
+    .delete()
+    .eq("assignment_id", assignmentId)
+    .eq("user_id", userId);
+  if (error) throw new Error(`Supabase: ${error.message}`);
+}
+
+export async function countRepositorySubmissions(
+  repositoryId: string,
+): Promise<number> {
+  const { count, error } = await db()
+    .from("submissions")
+    .select("id", { count: "exact", head: true })
+    .eq("student_repository_id", repositoryId);
+  if (error) throw new Error(`Supabase: ${error.message}`);
+  return count ?? 0;
+}
+
+export async function markRepositoryRevoked(
+  repositoryId: string,
+  message: string,
+): Promise<void> {
+  const { error } = await db()
+    .from("student_repositories")
+    .update({ status: "REVOKED", provision_error: message })
+    .eq("id", repositoryId);
+  if (error) throw new Error(`Supabase: ${error.message}`);
+}

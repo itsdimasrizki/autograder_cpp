@@ -76,6 +76,31 @@ export async function addCollaborator(params: {
   );
 }
 
+/** Mencabut akses mahasiswa tanpa menghapus repository. */
+export async function removeCollaborator(params: {
+  owner: string;
+  repo: string;
+  username: string;
+}): Promise<void> {
+  await githubRequest<unknown>(
+    `/repos/${encodeURIComponent(params.owner)}/${encodeURIComponent(
+      params.repo,
+    )}/collaborators/${encodeURIComponent(params.username)}`,
+    { method: "DELETE" },
+  );
+}
+
+/** Menghapus repository fisik; pemanggil wajib memeriksa histori lebih dulu. */
+export async function deleteRepo(params: {
+  owner: string;
+  repo: string;
+}): Promise<void> {
+  await githubRequest<unknown>(
+    `/repos/${encodeURIComponent(params.owner)}/${encodeURIComponent(params.repo)}`,
+    { method: "DELETE" },
+  );
+}
+
 /** SHA blob sebuah berkas pada ref tertentu; null bila berkas tidak ada. */
 export async function getFileSha(params: {
   owner: string;

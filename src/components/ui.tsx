@@ -53,6 +53,7 @@ const badgeStyles: Record<string, string> = {
   READY: "bg-emerald-100 text-emerald-800",
   PENDING: "bg-slate-100 text-slate-700",
   FAILED: "bg-red-100 text-red-800",
+  REVOKED: "bg-amber-100 text-amber-800",
   SKIP: "bg-slate-100 text-slate-600",
   TERLAMBAT: "bg-amber-100 text-amber-800",
   SUPER_ADMIN: "bg-purple-100 text-purple-800",

@@ -13,6 +13,14 @@ import {
 import { getAssignment } from "@/lib/db/assignments";
 import { getClass, listClassMembers } from "@/lib/db/courses";
 import { findUserById } from "@/lib/db/users";
+import {
+  countRepositorySubmissions,
+  deleteRepositoryRecord,
+  findRepository,
+  markRepositoryRevoked,
+} from "@/lib/db/repositories";
+import { deleteRepo, removeCollaborator } from "@/lib/github/repos";
+import { env } from "@/lib/env";
 import { provisionMany, provisionRepository } from "@/lib/provisioning/provision";
 import { runAction, safePath, withResult } from "@/lib/actions/result";
 
@@ -87,9 +95,14 @@ export async function provisionClassAction(formData: FormData) {
       throw new Error("Tugas ini bukan milik mata kuliah kelas tersebut.");
     }
 
-    const students = (await listClassMembers(input.classId, "STUDENT")).map(
-      (m) => m.user,
-    );
+    const skipUserIds = formData
+      .getAll("skipUserId")
+      .map(String)
+      .filter((value) => uuid.safeParse(value).success);
+    const skipped = new Set(skipUserIds);
+    const students = (await listClassMembers(input.classId, "STUDENT"))
+      .map((m) => m.user)
+      .filter((student) => !skipped.has(student.id));
     const result = await provisionMany({ assignment, students });
 
     if (result.failed > 0) {
@@ -98,6 +111,75 @@ export async function provisionClassAction(formData: FormData) {
           .slice(0, 3)
           .join("; ")}`,
       );
+    }
+  });
+
+  const path = safePath(
+    `/assignments/${assignmentId}?classId=${classId}`,
+    "/dashboard",
+  );
+  revalidatePath(path);
+  redirect(withResult(path, message));
+}
+
+/**
+ * Membatalkan repository mahasiswa. Histori submission membuat repository
+ * tidak boleh dihapus; pada kasus itu hanya akses mahasiswa yang dicabut.
+ */
+export async function revokeRepositoryAction(formData: FormData) {
+  const assignmentId = String(formData.get("assignmentId") ?? "");
+  const classId = String(formData.get("classId") ?? "");
+  const message = await runAction(async () => {
+    const ctx = await requireAccessContext();
+    const input = z
+      .object({ assignmentId: uuid, classId: uuid, userId: uuid })
+      .parse({ assignmentId, classId, userId: formData.get("userId") });
+
+    assert(canManageClassRoster(ctx, input.classId), "Anda bukan asisten kelas ini.");
+    const [klass, assignment, repository, student] = await Promise.all([
+      getClass(input.classId),
+      getAssignment(input.assignmentId),
+      findRepository(input.assignmentId, input.userId),
+      findUserById(input.userId),
+    ]);
+    if (!klass || !assignment || assignment.course_id !== klass.course_id) {
+      throw new Error("Kelas dan tugas tidak cocok.");
+    }
+    if (!repository) throw new Error("Repository mahasiswa tidak ditemukan.");
+    if (!student) throw new Error("Mahasiswa tidak ditemukan.");
+    const targetMemberships = await membershipsOf(student.id);
+    assert(
+      targetMemberships.some((membership) => membership.class_id === input.classId),
+      "Mahasiswa ini bukan anggota kelas tersebut.",
+    );
+
+    const submissions = await countRepositorySubmissions(repository.id);
+    if (repository.status === "READY") {
+      try {
+        await removeCollaborator({
+          owner: env.githubOrg,
+          repo: repository.name,
+          username: student.github_login,
+        });
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        if (!detail.includes("HTTP 404")) throw error;
+      }
+    }
+
+    if (submissions > 0) {
+      await markRepositoryRevoked(
+        repository.id,
+        "Akses mahasiswa dicabut; histori submission dipertahankan.",
+      );
+    } else {
+      try {
+        await deleteRepo({ owner: env.githubOrg, repo: repository.name });
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        if (!detail.includes("HTTP 404")) throw error;
+      }
+      await deleteRepositoryRecord(input.assignmentId, input.userId);
     }
   });
 
