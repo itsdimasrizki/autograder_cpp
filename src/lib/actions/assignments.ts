@@ -5,7 +5,11 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 
 import { requireAccessContext } from "@/lib/auth/authorize";
-import { assert, canManageAssignment } from "@/lib/auth/policy";
+import {
+  assert,
+  canManageAssignment,
+  canManageClassAssignmentSettings,
+} from "@/lib/auth/policy";
 import {
   archiveAssignment,
   countAssignmentFootprint,
@@ -20,6 +24,12 @@ import {
   updateAssignment,
   updateTemplate,
 } from "@/lib/db/assignments";
+import {
+  deleteAllClassSettings,
+  deleteClassSettings,
+  upsertClassSettings,
+} from "@/lib/db/assignment-class-settings";
+import { getClass } from "@/lib/db/courses";
 import { isValidGitHubLogin } from "@/lib/github/naming";
 import {
   canDeleteTemplate,
@@ -27,16 +37,16 @@ import {
   describeTemplateDependents,
 } from "@/lib/lifecycle";
 import { runAction, withResult } from "@/lib/actions/result";
+import { fromWibInput } from "@/lib/time/wib";
 
 const uuid = z.string().uuid("ID tidak valid.");
 
-/** "" -> null, sekaligus memvalidasi tanggal ISO dari <input type="datetime-local">. */
+/**
+ * Isian <input type="datetime-local"> selalu ditafsirkan sebagai WIB, bukan
+ * sebagai zona waktu server. Kosong berarti "tanpa tenggat".
+ */
 function optionalDate(value: FormDataEntryValue | null): string | null {
-  const text = String(value ?? "").trim();
-  if (!text) return null;
-  const date = new Date(text);
-  if (Number.isNaN(date.getTime())) throw new Error("Tenggat tidak valid.");
-  return date.toISOString();
+  return fromWibInput(String(value ?? ""));
 }
 
 function optionalInt(value: FormDataEntryValue | null): number | null {
@@ -133,6 +143,15 @@ export async function updateAssignmentAction(formData: FormData) {
       deadline: optionalDate(formData.get("deadline")),
       max_attempts: optionalInt(formData.get("maxAttempts")),
     });
+
+    // Dua tombol pada satu form. "Simpan perubahan" membiarkan kelas yang sudah
+    // disesuaikan asistennya tidak bergerak; "Simpan dan terapkan ke semua
+    // kelas" menghapus seluruh setelan kelas sehingga semuanya kembali ikut
+    // nilai dasar. Yang dihapus hanya setelan — submission dan riwayat nilai
+    // tidak disentuh.
+    if (String(formData.get("applyToAllClasses") ?? "") === "1") {
+      await deleteAllClassSettings(input.assignmentId);
+    }
   });
 
   revalidatePath(`/assignments/${assignmentId}`);
@@ -340,4 +359,86 @@ export async function deleteTemplateAction(formData: FormData) {
   revalidatePath("/templates");
   revalidatePath("/admin");
   redirect(withResult("/templates", message));
+}
+
+/**
+ * Menyimpan setelan sebuah tugas untuk SATU kelas.
+ *
+ * Ini satu-satunya jalan asisten mengubah tenggat, kuota percobaan, dan mode
+ * penilaian — dan hanya untuk kelas yang benar-benar diasuhnya. Nilai dasar
+ * tugas tetap tidak tersentuh.
+ */
+export async function updateClassSettingsAction(formData: FormData) {
+  const assignmentId = String(formData.get("assignmentId") ?? "");
+  const classId = String(formData.get("classId") ?? "");
+
+  const message = await runAction(async () => {
+    const ctx = await requireAccessContext();
+
+    const input = z
+      .object({
+        assignmentId: uuid,
+        classId: uuid,
+        scoringMode: z.enum(["BEST", "LATEST", "FIRST"]),
+      })
+      .parse({
+        assignmentId,
+        classId,
+        scoringMode: formData.get("scoringMode") || "BEST",
+      });
+
+    assert(
+      canManageClassAssignmentSettings(ctx, input.classId),
+      "Anda hanya dapat menyetel kelas yang Anda asuh.",
+    );
+
+    const assignment = await getAssignment(input.assignmentId);
+    if (!assignment) throw new Error("Tugas tidak ditemukan.");
+
+    // Kelas harus benar-benar milik course tugas ini. Tanpa pemeriksaan ini,
+    // pesan yang muncul hanyalah pelanggaran foreign key dari database.
+    const klass = await getClass(input.classId);
+    if (!klass || klass.course_id !== assignment.course_id) {
+      throw new Error("Kelas tersebut bukan bagian dari mata kuliah tugas ini.");
+    }
+
+    await upsertClassSettings({
+      assignmentId: input.assignmentId,
+      classId: input.classId,
+      courseId: assignment.course_id,
+      deadline: optionalDate(formData.get("deadline")),
+      maxAttempts: optionalInt(formData.get("maxAttempts")),
+      scoringMode: input.scoringMode,
+      updatedBy: ctx.user.id,
+    });
+  });
+
+  const target = `/assignments/${assignmentId}?classId=${classId}`;
+  revalidatePath(`/assignments/${assignmentId}`);
+  redirect(withResult(target, message));
+}
+
+/** Mengembalikan satu kelas ke nilai dasar yang ditetapkan admin. */
+export async function resetClassSettingsAction(formData: FormData) {
+  const assignmentId = String(formData.get("assignmentId") ?? "");
+  const classId = String(formData.get("classId") ?? "");
+
+  const message = await runAction(async () => {
+    const ctx = await requireAccessContext();
+
+    const input = z
+      .object({ assignmentId: uuid, classId: uuid })
+      .parse({ assignmentId, classId });
+
+    assert(
+      canManageClassAssignmentSettings(ctx, input.classId),
+      "Anda hanya dapat menyetel kelas yang Anda asuh.",
+    );
+
+    await deleteClassSettings(input.assignmentId, input.classId);
+  });
+
+  const target = `/assignments/${assignmentId}?classId=${classId}`;
+  revalidatePath(`/assignments/${assignmentId}`);
+  redirect(withResult(target, message));
 }

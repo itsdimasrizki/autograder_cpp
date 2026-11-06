@@ -9,6 +9,7 @@ import type {
   User,
 } from "@/lib/db/types";
 import type { Membership } from "@/lib/auth/policy";
+import type { StudentClassMembership } from "@/lib/grading/config";
 
 // -----------------------------------------------------------------------------
 // Keanggotaan
@@ -21,6 +22,26 @@ export async function listMembershipsOf(userId: string): Promise<Membership[]> {
     .eq("user_id", userId);
   if (error) throw new Error(`Supabase: ${error.message}`);
   return (data ?? []) as Membership[];
+}
+
+/**
+ * Keanggotaan MAHASISWA seseorang, lengkap dengan waktu bergabung.
+ *
+ * Berbeda dari listMembershipsOf yang dipakai otorisasi, di sini created_at
+ * ikut diambil karena dipakai pickStudentClassId untuk memutuskan kelas mana
+ * yang konfigurasinya berlaku bila seseorang terdaftar di dua kelas pada satu
+ * course.
+ */
+export async function listStudentClassMemberships(
+  userId: string,
+): Promise<StudentClassMembership[]> {
+  const { data, error } = await db()
+    .from("course_members")
+    .select("course_id, class_id, created_at")
+    .eq("user_id", userId)
+    .eq("role", "STUDENT");
+  if (error) throw new Error(`Supabase: ${error.message}`);
+  return (data ?? []) as StudentClassMembership[];
 }
 
 export interface UserClassLabel {

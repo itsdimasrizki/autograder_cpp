@@ -54,6 +54,7 @@ const badgeStyles: Record<string, string> = {
   PENDING: "bg-slate-100 text-slate-700",
   FAILED: "bg-red-100 text-red-800",
   SKIP: "bg-slate-100 text-slate-600",
+  TERLAMBAT: "bg-amber-100 text-amber-800",
   SUPER_ADMIN: "bg-purple-100 text-purple-800",
   ASSISTANT: "bg-blue-100 text-blue-800",
   STUDENT: "bg-slate-100 text-slate-700",
@@ -168,16 +169,10 @@ export function ErrorNote({ children }: { children: ReactNode }) {
   );
 }
 
-/** Format tanggal ringkas untuk tabel. */
-export function formatDate(value: string | null | undefined): string {
-  if (!value) return "—";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "—";
-  return date.toLocaleString("id-ID", {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
+/**
+ * Format tanggal ringkas untuk tabel — selalu WIB.
+ *
+ * Satu-satunya implementasi ada di @/lib/time/wib; di sini hanya diekspor
+ * ulang supaya belasan pemanggil yang sudah ada tidak perlu diubah.
+ */
+export { formatWib as formatDate } from "@/lib/time/wib";

@@ -22,6 +22,9 @@ export function Shell({
     { href: "/dashboard", label: "Dasbor" },
     { href: "/courses", label: "Mata Kuliah" },
   ];
+  if (user.role === "SUPER_ADMIN" || user.role === "ASSISTANT") {
+    links.push({ href: "/gradebook", label: "Pembukuan" });
+  }
   if (user.role === "SUPER_ADMIN") {
     links.push(
       { href: "/templates", label: "Template" },
